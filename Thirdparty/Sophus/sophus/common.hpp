@@ -1,8 +1,7 @@
 /// @file
 /// Common functionality.
 
-#ifndef SOPHUS_COMMON_HPP
-#define SOPHUS_COMMON_HPP
+#pragma once
 
 #include <cmath>
 #include <cstdio>
@@ -12,9 +11,64 @@
 
 #include <Eigen/Core>
 
-#if !defined(SOPHUS_DISABLE_ENSURES)
-#include "formatstring.hpp"
-#endif //!defined(SOPHUS_DISABLE_ENSURES)
+#undef SOPHUS_COMPILE_TIME_FMT
+
+#ifdef SOPHUS_USE_BASIC_LOGGING
+
+#define SOPHUS_FMT_CSTR(description, ...) description
+#define SOPHUS_FMT_STR(description, ...) std::string(description)
+#define SOPHUS_FMT_PRINT(description, ...) std::printf("%s\n", description)
+#define SOPHUS_FMT_ARG(arg)
+
+#else  // !SOPHUS_USE_BASIC_LOGGING
+
+#ifdef __linux__
+#define SOPHUS_COMPILE_TIME_FMT
+#endif
+
+#ifdef __APPLE__
+#include "TargetConditionals.h"
+#ifdef TARGET_OS_MAC
+#define SOPHUS_COMPILE_TIME_FMT
+#endif
+#endif
+
+
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+
+#if FMT_VERSION >= 90000
+#define SOPHUS_FMT_ARG(arg) fmt::streamed(arg)
+#else
+#define SOPHUS_FMT_ARG(arg) arg
+#endif
+
+#ifdef SOPHUS_COMPILE_TIME_FMT
+// To keep compatibility with older libfmt versions,
+// disable the compile time check if FMT_STRING is not available.
+#ifdef FMT_STRING
+// compile-time format check on x
+#define SOPHUS_FMT_STRING(x) FMT_STRING(x)
+#else
+// identity, hence no compile-time check on x
+#define SOPHUS_FMT_STRING(x) x
+#endif
+#else  // ! SOPHUS_COMPILE_TIME_FMT
+// identity, hence no compile-time check on x
+#define SOPHUS_FMT_STRING(x) x
+#endif  // ! SOPHUS_COMPILE_TIME_FMT
+
+#define SOPHUS_FMT_CSTR(description, ...) \
+  fmt::format(SOPHUS_FMT_STRING(description), ##__VA_ARGS__).c_str()
+
+#define SOPHUS_FMT_STR(description, ...) \
+  fmt::format(SOPHUS_FMT_STRING(description), ##__VA_ARGS__)
+
+#define SOPHUS_FMT_PRINT(description, ...)                   \
+  fmt::print(SOPHUS_FMT_STRING(description), ##__VA_ARGS__); \
+  fmt::print("\n")
+
+#endif  // !SOPHUS_USE_BASIC_LOGGING
 
 // following boost's assert.hpp
 #undef SOPHUS_ENSURE
@@ -37,8 +91,8 @@
 #define EIGEN_DEVICE_FUNC
 #endif
 
-// NVCC on windows has issues with defaulting the Map specialization constructors, so
-// special case that specific platform case.
+// NVCC on windows has issues with defaulting the Map specialization
+// constructors, so special case that specific platform case.
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define SOPHUS_WINDOW_NVCC_FALLBACK
 #endif
@@ -56,35 +110,45 @@ void ensureFailed(char const* function, char const* file, int line,
                   char const* description);
 }
 
-#define SOPHUS_ENSURE(expr, ...)                     \
-  ((expr) ? ((void)0)                                \
-          : ::Sophus::ensureFailed(                  \
-                SOPHUS_FUNCTION, __FILE__, __LINE__, \
-                Sophus::details::FormatString(__VA_ARGS__).c_str()))
+#define SOPHUS_ENSURE(expr, description, ...)                        \
+  ((expr)                                                            \
+       ? ((void)0)                                                   \
+       : ::Sophus::ensureFailed(SOPHUS_FUNCTION, __FILE__, __LINE__, \
+                                SOPHUS_FMT_CSTR(description, ##__VA_ARGS__)))
 #else
-// LCOV_EXCL_START
 
-namespace Sophus {
-template <class... Args>
-SOPHUS_FUNC void defaultEnsure(char const* function, char const* file, int line,
-                               char const* description, Args&&... args) {
-  std::printf("Sophus ensure failed in function '%s', file '%s', line %d.\n",
-              function, file, line);
+#define SOPHUS_DEDAULT_ENSURE_FAILURE_IMPL(function, file, line, description, \
+                                           ...)                               \
+  do {                                                                        \
+    std::printf(                                                              \
+        "Sophus ensure failed in function '%s', "                             \
+        "file '%s', line %d.\n",                                              \
+        function, file, line);                                                \
+    SOPHUS_FMT_PRINT(description, ##__VA_ARGS__);                             \
+    std::abort();                                                             \
+  } while (false)
+
 #ifdef __CUDACC__
-  std::printf("%s", description);
+#define SOPHUS_ENSURE(expr, description, ...)                                  \
+  do {                                                                         \
+    if (!(expr)) {                                                             \
+      std::printf(                                                             \
+          "Sophus ensure failed in function '%s', file '%s', line %d.\n",      \
+          SOPHUS_FUNCTION, __FILE__, __LINE__);                                \
+      std::printf("%s", description);                                          \
+      /* there is no std::abort in cuda kernels, hence we just print the error \
+       * message here*/                                                        \
+    }                                                                          \
+  } while (false)
 #else
-  std::cout << details::FormatString(description, std::forward<Args>(args)...)
-            << std::endl;
-  std::abort();
+#define SOPHUS_ENSURE(expr, ...)                                              \
+  do {                                                                        \
+    if (!(expr)) {                                                            \
+      SOPHUS_DEDAULT_ENSURE_FAILURE_IMPL(SOPHUS_FUNCTION, __FILE__, __LINE__, \
+                                         ##__VA_ARGS__);                      \
+    }                                                                         \
+  } while (false)
 #endif
-}
-}  // namespace Sophus
-
-// LCOV_EXCL_STOP
-#define SOPHUS_ENSURE(expr, ...)                                       \
-  ((expr) ? ((void)0)                                                  \
-          : Sophus::defaultEnsure(SOPHUS_FUNCTION, __FILE__, __LINE__, \
-                                  ##__VA_ARGS__))
 #endif
 
 namespace Sophus {
@@ -92,6 +156,10 @@ namespace Sophus {
 template <class Scalar>
 struct Constants {
   SOPHUS_FUNC static Scalar epsilon() { return Scalar(1e-10); }
+
+  SOPHUS_FUNC static Scalar epsilonPlus() {
+    return epsilon() * (Scalar(1.) + epsilon());
+  }
 
   SOPHUS_FUNC static Scalar epsilonSqrt() {
     using std::sqrt;
@@ -107,6 +175,9 @@ template <>
 struct Constants<float> {
   SOPHUS_FUNC static float constexpr epsilon() {
     return static_cast<float>(1e-5);
+  }
+  SOPHUS_FUNC static float epsilonPlus() {
+    return epsilon() * (1.f + epsilon());
   }
 
   SOPHUS_FUNC static float epsilonSqrt() { return std::sqrt(epsilon()); }
@@ -174,5 +245,3 @@ struct IsUniformRandomBitGenerator {
                             std::is_unsigned<decltype(G::max())>::value;
 };
 }  // namespace Sophus
-
-#endif  // SOPHUS_COMMON_HPP

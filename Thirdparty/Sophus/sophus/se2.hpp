@@ -1,8 +1,7 @@
 /// @file
 /// Special Euclidean group SE(2) - rotation and translation in 2d.
 
-#ifndef SOPHUS_SE2_HPP
-#define SOPHUS_SE2_HPP
+#pragma once
 
 #include "so2.hpp"
 
@@ -70,10 +69,13 @@ class SE2Base {
   static int constexpr num_parameters = 4;
   /// Group transformations are 3x3 matrices.
   static int constexpr N = 3;
+  /// Points are 2-dimensional
+  static int constexpr Dim = 2;
   using Transformation = Matrix<Scalar, N, N>;
   using Point = Vector2<Scalar>;
   using HomogeneousPoint = Vector3<Scalar>;
   using Line = ParametrizedLine2<Scalar>;
+  using Hyperplane = Hyperplane2<Scalar>;
   using Tangent = Vector<Scalar, DoF>;
   using Adjoint = Matrix<Scalar, DoF, DoF>;
 
@@ -140,6 +142,18 @@ class SE2Base {
     return J;
   }
 
+  /// Returns derivative of log(this^{-1} * x) by x at x=this.
+  ///
+  SOPHUS_FUNC Matrix<Scalar, DoF, num_parameters> Dx_log_this_inv_by_x_at_this()
+      const {
+    Matrix<Scalar, DoF, num_parameters> J;
+    J.template block<2, 2>(0, 0).setZero();
+    J.template block<2, 2>(0, 2) = so2().inverse().matrix();
+    J.template block<1, 2>(2, 0) = so2().Dx_log_this_inv_by_x_at_this();
+    J.template block<1, 2>(2, 2).setZero();
+    return J;
+  }
+
   /// Returns group inverse.
   ///
   SOPHUS_FUNC SE2<Scalar> inverse() const {
@@ -198,11 +212,11 @@ class SE2Base {
   /// ``o`` a 2-column vector of zeros.
   ///
   SOPHUS_FUNC Transformation matrix() const {
-    Transformation homogenious_matrix;
-    homogenious_matrix.template topLeftCorner<2, 3>() = matrix2x3();
-    homogenious_matrix.row(2) =
+    Transformation homogeneous_matrix;
+    homogeneous_matrix.template topLeftCorner<2, 3>() = matrix2x3();
+    homogeneous_matrix.row(2) =
         Matrix<Scalar, 1, 3>(Scalar(0), Scalar(0), Scalar(1));
-    return homogenious_matrix;
+    return homogeneous_matrix;
   }
 
   /// Returns the significant first two rows of the matrix above.
@@ -272,6 +286,23 @@ class SE2Base {
     return Line((*this) * l.origin(), so2() * l.direction());
   }
 
+  /// Group action on hyper-planes.
+  ///
+  /// This function rotates a hyper-plane ``n.x + d = 0`` by the SE2
+  /// element:
+  ///
+  /// Normal vector ``n`` is rotated
+  /// Offset ``d`` is adjusted for translation
+  ///
+  /// Note that in 2d-case hyper-planes are just another parametrization of
+  /// lines
+  ///
+  SOPHUS_FUNC Hyperplane operator*(Hyperplane const& p) const {
+    Hyperplane const rotated = so2() * p;
+    return Hyperplane(rotated.normal(),
+                      rotated.offset() - translation().dot(rotated.normal()));
+  }
+
   /// In-place group multiplication. This method is only valid if the return
   /// type of the multiplication is compatible with this SO2's Scalar type.
   ///
@@ -313,9 +344,10 @@ class SE2Base {
   /// Precondition: ``R`` must be orthogonal and ``det(R)=1``.
   ///
   SOPHUS_FUNC void setRotationMatrix(Matrix<Scalar, 2, 2> const& R) {
-    SOPHUS_ENSURE(isOrthogonal(R), "R is not orthogonal:\n %", R);
-    SOPHUS_ENSURE(R.determinant() > Scalar(0), "det(R) is not positive: %",
-                  R.determinant());
+    SOPHUS_ENSURE(isOrthogonal(R), "R is not orthogonal:\n {}",
+                  SOPHUS_FMT_ARG(R));
+    SOPHUS_ENSURE(R.determinant() > Scalar(0), "det(R) is not positive: {}",
+                  SOPHUS_FMT_ARG(R.determinant()));
     typename SO2Type::ComplexTemporaryType const complex(
         Scalar(0.5) * (R(0, 0) + R(1, 1)), Scalar(0.5) * (R(1, 0) - R(0, 1)));
     so2().setComplex(complex);
@@ -374,6 +406,11 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
   using TranslationMember = Vector2<Scalar, Options>;
 
   using Base::operator=;
+
+  /// Define copy-assignment operator explicitly. The definition of
+  /// implicit copy assignment operator is deprecated in presence of a
+  /// user-declared copy constructor (-Wdeprecated-copy in clang >= 13).
+  SOPHUS_FUNC SE2& operator=(SE2 const& other) = default;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -442,14 +479,14 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
   /// normalized.
   ///
   SOPHUS_FUNC Scalar* data() {
-    // so2_ and translation_ are layed out sequentially with no padding
+    // so2_ and translation_ are lay out sequentially with no padding
     return so2_.data();
   }
 
   /// Const version of data() above.
   ///
   SOPHUS_FUNC Scalar const* data() const {
-    /// so2_ and translation_ are layed out sequentially with no padding
+    /// so2_ and translation_ are lay out sequentially with no padding
     return so2_.data();
   }
 
@@ -488,8 +525,10 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
       Scalar const i(1);
 
       // clang-format off
-      J << o, o, o, o, o, i, i, o, -Scalar(0.5) * upsilon[1], o, i,
-          Scalar(0.5) * upsilon[0];
+      J << o, o, o,
+           o, o, i,
+           i, o, -Scalar(0.5) * upsilon[1],
+           o, i,  Scalar(0.5) * upsilon[0];
       // clang-format on
       return J;
     }
@@ -532,8 +571,21 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
     Scalar const i(1);
 
     // clang-format off
-    J << o, o, o, o, o, i, i, o, o, o, i, o;
+    J << o, o, o,
+         o, o, i,
+         i, o, o,
+         o, i, o;
     // clang-format on
+    return J;
+  }
+
+  /// Returns derivative of exp(x) * p wrt. x_i at x=0.
+  ///
+  SOPHUS_FUNC static Sophus::Matrix<Scalar, 2, DoF> Dx_exp_x_times_point_at_0(
+      Point const& point) {
+    Sophus::Matrix<Scalar, 2, DoF> J;
+    J << Sophus::Matrix2<Scalar>::Identity(),
+        Sophus::SO2<Scalar>::Dx_exp_x_times_point_at_0(point);
     return J;
   }
 
@@ -711,7 +763,7 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
   SOPHUS_FUNC static Tangent vee(Transformation const& Omega) {
     SOPHUS_ENSURE(
         Omega.row(2).template lpNorm<1>() < Constants<Scalar>::epsilon(),
-        "Omega: \n%", Omega);
+        "Omega: \n{}", SOPHUS_FMT_ARG(Omega));
     Tangent upsilon_omega;
     upsilon_omega.template head<2>() = Omega.col(2).template head<2>();
     upsilon_omega[2] = SO2<Scalar>::vee(Omega.template topLeftCorner<2, 2>());
@@ -724,9 +776,10 @@ class SE2 : public SE2Base<SE2<Scalar_, Options>> {
 };
 
 template <class Scalar, int Options>
-SE2<Scalar, Options>::SE2() : translation_(TranslationMember::Zero()) {
+SOPHUS_FUNC SE2<Scalar, Options>::SE2()
+    : translation_(TranslationMember::Zero()) {
   static_assert(std::is_standard_layout<SE2>::value,
-                "Assume standard layout for the use of offsetof check below.");
+                "Assume standard layout for the use of offset of check below.");
   static_assert(
       offsetof(SE2, so2_) + sizeof(Scalar) * SO2<Scalar>::num_parameters ==
           offsetof(SE2, translation_),
@@ -760,7 +813,7 @@ class Map<Sophus::SE2<Scalar_>, Options>
   using Base::operator*;
 
   SOPHUS_FUNC
-  Map(Scalar* coeffs)
+  explicit Map(Scalar* coeffs)
       : so2_(coeffs),
         translation_(coeffs + Sophus::SO2<Scalar>::num_parameters) {}
 
@@ -809,7 +862,7 @@ class Map<Sophus::SE2<Scalar_> const, Options>
   using Base::operator*=;
   using Base::operator*;
 
-  SOPHUS_FUNC Map(Scalar const* coeffs)
+  SOPHUS_FUNC explicit Map(Scalar const* coeffs)
       : so2_(coeffs),
         translation_(coeffs + Sophus::SO2<Scalar>::num_parameters) {}
 
@@ -831,5 +884,3 @@ class Map<Sophus::SE2<Scalar_> const, Options>
   Map<Sophus::Vector2<Scalar> const, Options> const translation_;
 };
 }  // namespace Eigen
-
-#endif

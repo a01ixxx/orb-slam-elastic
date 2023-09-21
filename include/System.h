@@ -40,6 +40,12 @@
 #include "ImuTypes.h"
 #include "Settings.h"
 
+// Ao added
+extern vector<double> imu_exe_times;
+extern vector<double> left_camera_exe_times;
+extern vector<double> right_camera_exe_times;
+extern vector<double> tracking_exe_times;
+extern vector<double> ba_exe_times;
 
 namespace ORB_SLAM3
 {

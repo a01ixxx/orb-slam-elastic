@@ -25,6 +25,13 @@
 #include<thread>
 #include<mutex>
 
+// Time
+#define _POSIX_C_SOURCE 199309
+#include <stdio.h>
+#include <time.h>
+#include <pthread.h>
+#include <vector>
+
 #include<ros/ros.h>
 #include<cv_bridge/cv_bridge.h>
 #include<sensor_msgs/Imu.h>
@@ -35,6 +42,14 @@
 #include"../include/ImuTypes.h"
 
 using namespace std;
+
+
+// Ao added
+vector<double> imu_exe_times;
+vector<double> left_camera_exe_times;
+vector<double> right_camera_exe_times;
+vector<double> tracking_exe_times;
+vector<double> ba_exe_times;
 
 class ImuGrabber
 {
@@ -95,6 +110,14 @@ int main(int argc, char **argv)
   // Create SLAM system. It initializes all system threads and gets ready to process frames.
   ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO,true);
 
+  imu_exe_times.reserve(30000);
+  left_camera_exe_times.reserve(3000);
+  right_camera_exe_times.reserve(3000);
+  tracking_exe_times.reserve(3000);
+  ba_exe_times.reserve(3000);
+
+  std::cout << "Hello Whale" << std::endl;
+
   ImuGrabber imugb;
   ImageGrabber igb(&SLAM,&imugb,sbRect == "true",bEqual);
   
@@ -153,20 +176,40 @@ int main(int argc, char **argv)
 
 void ImageGrabber::GrabImageLeft(const sensor_msgs::ImageConstPtr &img_msg)
 {
+
+  struct timespec start, end;
+    
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
   mBufMutexLeft.lock();
   if (!imgLeftBuf.empty())
     imgLeftBuf.pop();
   imgLeftBuf.push(img_msg);
   mBufMutexLeft.unlock();
+
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+
+  double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
+                        (end.tv_nsec - start.tv_nsec);
+    
+  left_camera_exe_times.push_back(time_spent);
 }
 
 void ImageGrabber::GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg)
 {
+  struct timespec start, end; 
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
   mBufMutexRight.lock();
   if (!imgRightBuf.empty())
     imgRightBuf.pop();
   imgRightBuf.push(img_msg);
   mBufMutexRight.unlock();
+
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+  double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
+                        (end.tv_nsec - start.tv_nsec);
+  right_camera_exe_times.push_back(time_spent);
 }
 
 cv::Mat ImageGrabber::GetImage(const sensor_msgs::ImageConstPtr &img_msg)
@@ -261,6 +304,10 @@ void ImageGrabber::SyncWithImu()
         mClahe->apply(imRight,imRight);
       }
 
+// Tracking Latency
+      struct timespec start, end;
+      clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
       if(do_rectify)
       {
         cv::remap(imLeft,imLeft,M1l,M2l,cv::INTER_LINEAR);
@@ -268,6 +315,14 @@ void ImageGrabber::SyncWithImu()
       }
 
       mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
+      clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+
+      double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
+                        (end.tv_nsec - start.tv_nsec);
+    
+      tracking_exe_times.push_back(time_spent);
+
+// End of Tracking
 
       std::chrono::milliseconds tSleep(1);
       std::this_thread::sleep_for(tSleep);
@@ -275,11 +330,36 @@ void ImageGrabber::SyncWithImu()
   }
 }
 
+
 void ImuGrabber::GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 {
-  mBufMutex.lock();
-  imuBuf.push(imu_msg);
-  mBufMutex.unlock();
+
+    // struct timespec res;
+    // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
+    //     perror("clock_getres");
+    //     return;
+    // }
+    // printf("Resolution: %ld seconds and %ld nanoseconds\n", res.tv_sec, res.tv_nsec);
+
+    struct timespec start, end;
+    
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
+
+   mBufMutex.lock();
+   imuBuf.push(imu_msg);
+   mBufMutex.unlock();
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+
+    double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
+                        (end.tv_nsec - start.tv_nsec);
+    
+    imu_exe_times.push_back(time_spent);
+
+    // printf("Thread CPU time used: %lf nanoseconds\n", time_spent);
+
+// End of Imu Driver
   return;
 }
 

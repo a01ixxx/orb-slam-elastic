@@ -1,8 +1,7 @@
 /// @file
 /// Interpolation for Lie groups.
 
-#ifndef SOPHUS_INTERPOLATE_HPP
-#define SOPHUS_INTERPOLATE_HPP
+#pragma once
 
 #include <Eigen/Eigenvalues>
 
@@ -15,7 +14,7 @@ namespace Sophus {
 ///
 /// It returns a pose ``foo_T_quiz`` with ``quiz`` being a frame between ``bar``
 /// and ``baz``. If ``alpha=0`` it returns ``foo_T_bar``. If it is 1, it returns
-/// ``foo_T_bar``.
+/// ``foo_T_baz``.
 ///
 /// (Since interpolation on Lie groups is inverse-invariant, we can equivalently
 /// think of the input arguments as being ``bar_T_foo``, ``baz_T_foo`` and the
@@ -29,10 +28,8 @@ enable_if_t<interp_details::Traits<G>::supported, G> interpolate(
   using Scalar = typename G::Scalar;
   Scalar inter_p(p);
   SOPHUS_ENSURE(inter_p >= Scalar(0) && inter_p <= Scalar(1),
-                "p (%) must in [0, 1].");
+                "p ({}) must in [0, 1].", SOPHUS_FMT_ARG(inter_p));
   return foo_T_bar * G::exp(inter_p * (foo_T_bar.inverse() * foo_T_baz).log());
 }
 
 }  // namespace Sophus
-
-#endif  // SOPHUS_INTERPOLATE_HPP

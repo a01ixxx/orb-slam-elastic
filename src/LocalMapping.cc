@@ -26,6 +26,13 @@
 
 #include<mutex>
 #include<chrono>
+// Time
+#define _POSIX_C_SOURCE 199309
+#include <stdio.h>
+#include <time.h>
+#include <pthread.h>
+#include <vector>
+using namespace std;
 
 namespace ORB_SLAM3
 {
@@ -45,6 +52,7 @@ LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, 
     mNumKFCulling=0;
 
 #ifdef REGISTER_TIMES
+    ba_exe_times.reverse(3000);
     nLBA_exec = 0;
     nLBA_abort = 0;
 #endif
@@ -115,6 +123,11 @@ void LocalMapping::Run()
             vdMPCreation_ms.push_back(timeMPCreation);
 #endif
 
+
+            // BA Latency
+            struct timespec start, end;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
             bool b_doneLBA = false;
             int num_FixedKF_BA = 0;
             int num_OptKF_BA = 0;
@@ -156,6 +169,14 @@ void LocalMapping::Run()
                     }
 
                 }
+
+                double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
+                        (end.tv_nsec - start.tv_nsec);
+                if (!b_doneLBA) time_spent = 0;
+                ba_exe_times.push_back(time_spent);
+
+// End of BA latency
+
 #ifdef REGISTER_TIMES
                 std::chrono::steady_clock::time_point time_EndLBA = std::chrono::steady_clock::now();
 

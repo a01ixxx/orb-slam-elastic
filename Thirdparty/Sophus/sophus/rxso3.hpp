@@ -1,8 +1,7 @@
 /// @file
 /// Direct product R X SO(3) - rotation and scaling in 3d.
 
-#ifndef SOPHUS_RXSO3_HPP
-#define SOPHUS_RXSO3_HPP
+#pragma once
 
 #include "so3.hpp"
 
@@ -59,9 +58,10 @@ namespace Sophus {
 /// freedom (DoF) of RxSO3 (=4) equals the number of internal parameters (=4).
 ///
 /// This class has the explicit class invariant that the scale ``s`` is not
-/// too close to zero. Strictly speaking, it must hold that:
+/// too close to either zero or infinity. Strictly speaking, it must hold that:
 ///
-///   ``quaternion().squaredNorm() >= Constants::epsilon()``.
+///   ``quaternion().squaredNorm() >= Constants::epsilon()`` and
+///   ``1. / quaternion().squaredNorm() >= Constants::epsilon()``.
 ///
 /// In order to obey this condition, group multiplication is implemented with
 /// saturation such that a product always has a scale which is equal or greater
@@ -82,10 +82,13 @@ class RxSO3Base {
   static int constexpr num_parameters = 4;
   /// Group transformations are 3x3 matrices.
   static int constexpr N = 3;
+  /// Points are 3-dimensional
+  static int constexpr Dim = 3;
   using Transformation = Matrix<Scalar, N, N>;
   using Point = Vector3<Scalar>;
   using HomogeneousPoint = Vector4<Scalar>;
   using Line = ParametrizedLine3<Scalar>;
+  using Hyperplane = Hyperplane3<Scalar>;
   using Tangent = Vector<Scalar, DoF>;
   using Adjoint = Matrix<Scalar, DoF, DoF>;
 
@@ -237,16 +240,25 @@ class RxSO3Base {
   template <typename OtherDerived>
   SOPHUS_FUNC RxSO3Product<OtherDerived> operator*(
       RxSO3Base<OtherDerived> const& other) const {
+    using std::sqrt;
     using ResultT = ReturnScalar<OtherDerived>;
-    typename RxSO3Product<OtherDerived>::QuaternionType result_quaternion(
-        quaternion() * other.quaternion());
+    using QuaternionProductType =
+        typename RxSO3Product<OtherDerived>::QuaternionType;
+
+    QuaternionProductType result_quaternion(
+        Sophus::SO3<double>::QuaternionProduct<QuaternionProductType>(
+            quaternion(), other.quaternion()));
 
     ResultT scale = result_quaternion.squaredNorm();
     if (scale < Constants<ResultT>::epsilon()) {
       SOPHUS_ENSURE(scale > ResultT(0), "Scale must be greater zero.");
       /// Saturation to ensure class invariant.
       result_quaternion.normalize();
-      result_quaternion.coeffs() *= sqrt(Constants<Scalar>::epsilon());
+      result_quaternion.coeffs() *= sqrt(Constants<ResultT>::epsilonPlus());
+    }
+    if (scale > ResultT(1.) / Constants<ResultT>::epsilon()) {
+      result_quaternion.normalize();
+      result_quaternion.coeffs() /= sqrt(Constants<ResultT>::epsilonPlus());
     }
     return RxSO3Product<OtherDerived>(result_quaternion);
   }
@@ -286,7 +298,7 @@ class RxSO3Base {
   /// Group action on lines.
   ///
   /// This function rotates a parametrized line ``l(t) = o + t * d`` by the SO3
-  /// element ans scales it by the scale factor:
+  /// element and scales it by the scale factor:
   ///
   /// Origin ``o`` is rotated and scaled
   /// Direction ``d`` is rotated (preserving it's norm)
@@ -294,6 +306,20 @@ class RxSO3Base {
   SOPHUS_FUNC Line operator*(Line const& l) const {
     return Line((*this) * l.origin(),
                 (*this) * l.direction() / quaternion().squaredNorm());
+  }
+
+  /// Group action on planes.
+  ///
+  /// This function rotates parametrized plane
+  /// ``n.x + d = 0`` by the SO3 element and scales it by the scale factor:
+  ///
+  /// Normal vector ``n`` is rotated
+  /// Offset ``d`` is scaled
+  ///
+  SOPHUS_FUNC Hyperplane operator*(Hyperplane const& p) const {
+    const auto this_scale = scale();
+    return Hyperplane((*this) * p.normal() / this_scale,
+                      this_scale * p.offset());
   }
 
   /// In-place group multiplication. This method is only valid if the return
@@ -322,11 +348,15 @@ class RxSO3Base {
 
   /// Sets non-zero quaternion
   ///
-  /// Precondition: ``quat`` must not be close to zero.
+  /// Precondition: ``quat`` must not be close to either zero or infinity
   SOPHUS_FUNC void setQuaternion(Eigen::Quaternion<Scalar> const& quat) {
     SOPHUS_ENSURE(quat.squaredNorm() > Constants<Scalar>::epsilon() *
                                            Constants<Scalar>::epsilon(),
                   "Scale factor must be greater-equal epsilon.");
+    SOPHUS_ENSURE(
+        quat.squaredNorm() < Scalar(1.) / (Constants<Scalar>::epsilon() *
+                                           Constants<Scalar>::epsilon()),
+        "Inverse scale factor must be greater-equal epsilon.");
     static_cast<Derived*>(this)->quaternion_nonconst() = quat;
   }
 
@@ -383,6 +413,9 @@ class RxSO3Base {
     SOPHUS_ENSURE(squared_scale >= Constants<Scalar>::epsilon() *
                                        Constants<Scalar>::epsilon(),
                   "Scale factor must be greater-equal epsilon.");
+    SOPHUS_ENSURE(squared_scale < Scalar(1.) / (Constants<Scalar>::epsilon() *
+                                                Constants<Scalar>::epsilon()),
+                  "Inverse scale factor must be greater-equal epsilon.");
     Scalar scale = sqrt(squared_scale);
     quaternion_nonconst() = sR / scale;
     quaternion_nonconst().coeffs() *= sqrt(scale);
@@ -399,6 +432,51 @@ class RxSO3Base {
 
   SOPHUS_FUNC SO3<Scalar> so3() const { return SO3<Scalar>(quaternion()); }
 
+  /// Returns derivative of  this * RxSO3::exp(x) wrt. x at x=0
+  ///
+  SOPHUS_FUNC Matrix<Scalar, num_parameters, DoF> Dx_this_mul_exp_x_at_0()
+      const {
+    Matrix<Scalar, num_parameters, DoF> J;
+    Eigen::Quaternion<Scalar> const q = quaternion();
+    J.col(3) = q.coeffs() * Scalar(0.5);
+    Scalar const c0 = Scalar(0.5) * q.w();
+    Scalar const c1 = Scalar(0.5) * q.z();
+    Scalar const c2 = -c1;
+    Scalar const c3 = Scalar(0.5) * q.y();
+    Scalar const c4 = Scalar(0.5) * q.x();
+    Scalar const c5 = -c4;
+    Scalar const c6 = -c3;
+    J(0, 0) = c0;
+    J(0, 1) = c2;
+    J(0, 2) = c3;
+    J(1, 0) = c1;
+    J(1, 1) = c0;
+    J(1, 2) = c5;
+    J(2, 0) = c6;
+    J(2, 1) = c4;
+    J(2, 2) = c0;
+    J(3, 0) = c5;
+    J(3, 1) = c6;
+    J(3, 2) = c2;
+    return J;
+  }
+
+  /// Returns derivative of log(this^{-1} * x) by x at x=this.
+  ///
+  SOPHUS_FUNC Matrix<Scalar, DoF, num_parameters> Dx_log_this_inv_by_x_at_this()
+      const {
+    auto& q = quaternion();
+    Matrix<Scalar, DoF, num_parameters> J;
+    // clang-format off
+    J << q.w(),  q.z(), -q.y(), -q.x(),
+        -q.z(),  q.w(),  q.x(), -q.y(),
+         q.y(), -q.x(),  q.w(), -q.z(),
+         q.x(),  q.y(),  q.z(),  q.w();
+    // clang-format on
+    const Scalar scaler = Scalar(2.) / q.squaredNorm();
+    return J * scaler;
+  }
+
  private:
   /// Mutator of quaternion is private to ensure class invariant.
   ///
@@ -412,6 +490,9 @@ template <class Scalar_, int Options>
 class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
  public:
   using Base = RxSO3Base<RxSO3<Scalar_, Options>>;
+  static int constexpr DoF = Base::DoF;
+  static int constexpr num_parameters = Base::num_parameters;
+
   using Scalar = Scalar_;
   using Transformation = typename Base::Transformation;
   using Point = typename Base::Point;
@@ -424,6 +505,11 @@ class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
   friend class RxSO3Base<RxSO3<Scalar_, Options>>;
 
   using Base::operator=;
+
+  /// Define copy-assignment operator explicitly. The definition of
+  /// implicit copy assignment operator is deprecated in presence of a
+  /// user-declared copy constructor (-Wdeprecated-copy in clang >= 13).
+  SOPHUS_FUNC RxSO3& operator=(RxSO3 const& other) = default;
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
@@ -455,31 +541,36 @@ class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
   /// Constructor from scale factor and rotation matrix ``R``.
   ///
   /// Precondition: Rotation matrix ``R`` must to be orthogonal with determinant
-  ///               of 1 and ``scale`` must not be close to zero.
+  ///               of 1 and ``scale`` must not be close to either zero or
+  ///               infinity.
   ///
   SOPHUS_FUNC RxSO3(Scalar const& scale, Transformation const& R)
       : quaternion_(R) {
     SOPHUS_ENSURE(scale >= Constants<Scalar>::epsilon(),
                   "Scale factor must be greater-equal epsilon.");
+    SOPHUS_ENSURE(scale < Scalar(1.) / Constants<Scalar>::epsilon(),
+                  "Inverse scale factor must be greater-equal epsilon.");
     using std::sqrt;
     quaternion_.coeffs() *= sqrt(scale);
   }
 
   /// Constructor from scale factor and SO3
   ///
-  /// Precondition: ``scale`` must not to be close to zero.
+  /// Precondition: ``scale`` must not to be close to either zero or infinity.
   ///
   SOPHUS_FUNC RxSO3(Scalar const& scale, SO3<Scalar> const& so3)
       : quaternion_(so3.unit_quaternion()) {
     SOPHUS_ENSURE(scale >= Constants<Scalar>::epsilon(),
                   "Scale factor must be greater-equal epsilon.");
+    SOPHUS_ENSURE(scale < Scalar(1.) / Constants<Scalar>::epsilon(),
+                  "Inverse scale factor must be greater-equal epsilon.");
     using std::sqrt;
     quaternion_.coeffs() *= sqrt(scale);
   }
 
   /// Constructor from quaternion
   ///
-  /// Precondition: quaternion must not be close to zero.
+  /// Precondition: quaternion must not be close to either zero or infinity.
   ///
   template <class D>
   SOPHUS_FUNC explicit RxSO3(Eigen::QuaternionBase<D> const& quat)
@@ -488,11 +579,58 @@ class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
                   "must be same Scalar type.");
     SOPHUS_ENSURE(quaternion_.squaredNorm() >= Constants<Scalar>::epsilon(),
                   "Scale factor must be greater-equal epsilon.");
+    SOPHUS_ENSURE(
+        quat.squaredNorm() < Scalar(1.) / Constants<Scalar>::epsilon(),
+        "Inverse scale factor must be greater-equal epsilon.");
   }
+
+  /// Constructor from scale factor and unit quaternion
+  ///
+  /// Precondition: quaternion must not be close to zero.
+  ///
+  template <class D>
+  SOPHUS_FUNC explicit RxSO3(Scalar const& scale,
+                             Eigen::QuaternionBase<D> const& unit_quat)
+      : RxSO3(scale, SO3<Scalar>(unit_quat)) {}
 
   /// Accessor of quaternion.
   ///
   SOPHUS_FUNC QuaternionMember const& quaternion() const { return quaternion_; }
+
+  /// Returns derivative of exp(x) wrt. x_i at x=0.
+  ///
+  SOPHUS_FUNC static Sophus::Matrix<Scalar, num_parameters, DoF>
+  Dx_exp_x_at_0() {
+    static Scalar const h(0.5);
+    return h * Sophus::Matrix<Scalar, num_parameters, DoF>::Identity();
+  }
+
+  /// Returns derivative of exp(x) wrt. x.
+  ///
+  SOPHUS_FUNC static Sophus::Matrix<Scalar, num_parameters, DoF> Dx_exp_x(
+      const Tangent& a) {
+    using std::exp;
+    using std::sqrt;
+    Sophus::Matrix<Scalar, num_parameters, DoF> J;
+    Vector3<Scalar> const omega = a.template head<3>();
+    Scalar const sigma = a[3];
+    Eigen::Quaternion<Scalar> quat = SO3<Scalar>::exp(omega).unit_quaternion();
+    Scalar const scale = sqrt(exp(sigma));
+    Scalar const scale_half = scale * Scalar(0.5);
+
+    J.template block<4, 3>(0, 0) = SO3<Scalar>::Dx_exp_x(omega) * scale;
+    J.col(3) = quat.coeffs() * scale_half;
+    return J;
+  }
+
+  /// Returns derivative of exp(x) * p wrt. x_i at x=0.
+  ///
+  SOPHUS_FUNC static Sophus::Matrix<Scalar, 3, DoF> Dx_exp_x_times_point_at_0(
+      Point const& point) {
+    Sophus::Matrix<Scalar, 3, DoF> j;
+    j << Sophus::SO3<Scalar>::hat(-point), point;
+    return j;
+  }
 
   /// Returns derivative of exp(x).matrix() wrt. ``x_i at x=0``.
   ///
@@ -505,7 +643,7 @@ class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
   /// plus logarithm of scale) and returns the corresponding element of the
   /// group RxSO3.
   ///
-  /// To be more specific, thixs function computes ``expmat(hat(omega))``
+  /// To be more specific, this function computes ``expmat(hat(omega))``
   /// with ``expmat(.)`` being the matrix exponential and ``hat(.)`` being the
   /// hat()-operator of RSO3.
   ///
@@ -522,11 +660,17 @@ class RxSO3 : public RxSO3Base<RxSO3<Scalar_, Options>> {
                                                Scalar* theta) {
     SOPHUS_ENSURE(theta != nullptr, "must not be nullptr.");
     using std::exp;
+    using std::max;
+    using std::min;
     using std::sqrt;
 
     Vector3<Scalar> const omega = a.template head<3>();
     Scalar sigma = a[3];
-    Scalar sqrt_scale = sqrt(exp(sigma));
+    Scalar scale = exp(sigma);
+    // Ensure that scale-factor constraint is always valid
+    scale = max(scale, Constants<Scalar>::epsilonPlus());
+    scale = min(scale, Scalar(1.) / Constants<Scalar>::epsilonPlus());
+    Scalar sqrt_scale = sqrt(scale);
     Eigen::Quaternion<Scalar> quat =
         SO3<Scalar>::expAndTheta(omega, theta).unit_quaternion();
     quat.coeffs() *= sqrt_scale;
@@ -671,7 +815,7 @@ class Map<Sophus::RxSO3<Scalar_>, Options>
   using Base::operator*=;
   using Base::operator*;
 
-  SOPHUS_FUNC Map(Scalar* coeffs) : quaternion_(coeffs) {}
+  SOPHUS_FUNC explicit Map(Scalar* coeffs) : quaternion_(coeffs) {}
 
   /// Accessor of quaternion.
   ///
@@ -708,7 +852,7 @@ class Map<Sophus::RxSO3<Scalar_> const, Options>
   using Base::operator*;
 
   SOPHUS_FUNC
-  Map(Scalar const* coeffs) : quaternion_(coeffs) {}
+  explicit Map(Scalar const* coeffs) : quaternion_(coeffs) {}
 
   /// Accessor of quaternion.
   ///
@@ -721,5 +865,3 @@ class Map<Sophus::RxSO3<Scalar_> const, Options>
   Map<Eigen::Quaternion<Scalar> const, Options> const quaternion_;
 };
 }  // namespace Eigen
-
-#endif  /// SOPHUS_RXSO3_HPP
