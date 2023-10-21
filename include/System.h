@@ -40,12 +40,20 @@
 #include "ImuTypes.h"
 #include "Settings.h"
 
+
+// Time
+#define _POSIX_C_SOURCE 199309
+#include <stdio.h>
+#include <time.h>
+#include <pthread.h>
+#include <vector>
 // Ao added
-extern vector<double> imu_exe_times;
-extern vector<double> left_camera_exe_times;
-extern vector<double> right_camera_exe_times;
-extern vector<double> tracking_exe_times;
-extern vector<double> ba_exe_times;
+extern vector<std::pair<double, double>> imu_exe_times;
+extern vector<std::pair<double, double>> left_camera_exe_times;
+extern vector<std::pair<double, double>> right_camera_exe_times;
+extern vector<std::pair<double, double>> tracking_exe_times;
+extern vector<std::pair<double, double>> ba_exe_times;
+extern vector<std::pair<double, double>> loop_closing_exe_times;
 
 namespace ORB_SLAM3
 {

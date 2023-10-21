@@ -265,6 +265,10 @@ void LoopClosing::Run()
 
                         mvpLoopMapPoints = mvpLoopMPs;
 
+                        // BA Latency in ms
+                        struct timespec start, end;
+                        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
 #ifdef REGISTER_TIMES
                         std::chrono::steady_clock::time_point time_StartLoop = std::chrono::steady_clock::now();
 
@@ -278,6 +282,12 @@ void LoopClosing::Run()
                         double timeLoopTotal = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndLoop - time_StartLoop).count();
                         vdLoopTotal_ms.push_back(timeLoopTotal);
 #endif
+                        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                        double time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
+                                                    (end.tv_nsec - start.tv_nsec) / 1000000.0;
+                        std::pair<double, double> curr_pair = std::make_pair(mpCurrentKF->mTimeStamp, time_spent);
+                        loop_closing_exe_times.push_back(curr_pair);
+                        // End of latency loop closing
 
                         mnNumCorrection += 1;
                     }
@@ -294,6 +304,7 @@ void LoopClosing::Run()
 
             }
             mpLastCurrentKF = mpCurrentKF;
+            
         }
 
         ResetIfRequested();

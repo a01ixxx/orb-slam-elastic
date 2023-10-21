@@ -32,10 +32,12 @@
 using namespace std;
 
 // Ao added
-vector<double> imu_exe_times;
-vector<double> left_camera_exe_times;
-vector<double> right_camera_exe_times;
-vector<double> tracking_exe_times;
+vector<std::pair<double, double>> imu_exe_times;
+vector<std::pair<double, double>> left_camera_exe_times;
+vector<std::pair<double, double>> right_camera_exe_times;
+vector<std::pair<double, double>> tracking_exe_times;
+vector<std::pair<double, double>> ba_exe_times;
+vector<std::pair<double, double>> loop_closing_exe_times;
 
 class ImageGrabber
 {

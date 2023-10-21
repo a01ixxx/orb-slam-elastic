@@ -25,12 +25,11 @@
 #include<thread>
 #include<mutex>
 
-// Time
-#define _POSIX_C_SOURCE 199309
-#include <stdio.h>
-#include <time.h>
-#include <pthread.h>
-#include <vector>
+// For saving files
+#include <fstream>
+
+// For queue
+#include <ros/callback_queue.h>
 
 #include<ros/ros.h>
 #include<cv_bridge/cv_bridge.h>
@@ -45,17 +44,21 @@ using namespace std;
 
 
 // Ao added
-vector<double> imu_exe_times;
-vector<double> left_camera_exe_times;
-vector<double> right_camera_exe_times;
-vector<double> tracking_exe_times;
-vector<double> ba_exe_times;
+vector<std::pair<double, double>> imu_exe_times;
+vector<std::pair<double, double>> left_camera_exe_times;
+vector<std::pair<double, double>> right_camera_exe_times;
+vector<std::pair<double, double>> tracking_exe_times;
+vector<std::pair<double, double>> ba_exe_times;
+vector<std::pair<double, double>> fusion_exe_times;
+vector<std::pair<double, double>> loop_closing_exe_times;
 
 class ImuGrabber
 {
 public:
     ImuGrabber(){};
     void GrabImu(const sensor_msgs::ImuConstPtr &imu_msg);
+    void m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg);
+    void imu_thread_function();
 
     queue<sensor_msgs::ImuConstPtr> imuBuf;
     std::mutex mBufMutex;
@@ -71,6 +74,12 @@ public:
     cv::Mat GetImage(const sensor_msgs::ImageConstPtr &img_msg);
     void SyncWithImu();
 
+    void m_GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg);
+    void right_image_thread_function();
+
+    void m_GrabImageLeft(const sensor_msgs::ImageConstPtr &img_msg);
+    void left_image_thread_function();
+
     queue<sensor_msgs::ImageConstPtr> imgLeftBuf, imgRightBuf;
     std::mutex mBufMutexLeft,mBufMutexRight;
    
@@ -84,6 +93,276 @@ public:
     cv::Ptr<cv::CLAHE> mClahe = cv::createCLAHE(3.0, cv::Size(8, 8));
 };
 
+int times_saver() {
+
+    // Open a file in write mode
+    std::ofstream imu_exe_times_file("us_imu_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!imu_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : imu_exe_times) {
+        imu_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    imu_exe_times_file.close();
+    // End
+
+//////////////////////////////////////////////
+
+    // Open a file in write mode
+    std::ofstream left_camera_exe_times_file("us_left_camera_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!left_camera_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : left_camera_exe_times) {
+        left_camera_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    left_camera_exe_times_file.close();
+    // End
+
+//////////////////////////////////////////////
+
+    // Open a file in write mode
+    std::ofstream right_camera_exe_times_file("us_right_camera_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!right_camera_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : right_camera_exe_times) {
+        right_camera_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    right_camera_exe_times_file.close();
+    // End
+
+//////////////////////////////////////////////
+
+    // Open a file in write mode
+    std::ofstream tracking_exe_times_file("ms_tracking_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!tracking_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : tracking_exe_times) {
+        tracking_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    tracking_exe_times_file.close();
+    // End
+//////////////////////////////////////////////
+      // Open a file in write mode
+    std::ofstream ba_exe_times_file("ms_ba_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!ba_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : ba_exe_times) {
+        ba_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    ba_exe_times_file.close();
+    // End
+
+    // Open a file in write mode
+    // std::ofstream fusion_exe_times_file("fusion_exe_times_file.txt");
+
+    // // Check if the file is open
+    // if (!fusion_exe_times_file.is_open()) {
+    //     std::cerr << "Unable to open file";
+    //     return 1;
+    // }
+    // // Write the vector data to the file
+    // for (const auto& val : fusion_exe_times) {
+    //     fusion_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    // }
+    // // Close the file
+    // fusion_exe_times_file.close();
+    // // End
+
+    // Open a file in write mode
+    std::ofstream loop_closing_exe_times_file("ms_loop_closing_exe_times_file.txt");
+
+    // Check if the file is open
+    if (!loop_closing_exe_times_file.is_open()) {
+        std::cerr << "Unable to open file";
+        return 1;
+    }
+    // Write the vector data to the file
+    for (const auto& val : loop_closing_exe_times) {
+        loop_closing_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
+    }
+    // Close the file
+    loop_closing_exe_times_file.close();
+    // End
+  std::cout << "Timing information logging finished" << std::endl;
+  return 0;
+}
+
+///////////////////////////////////////////////////////////////
+void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
+{
+
+    // struct timespec res;
+    // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
+    //     perror("clock_getres");
+    //     return;
+    // }
+    // printf("Resolution: %ld seconds and %ld nanoseconds\n", res.tv_sec, res.tv_nsec);
+
+    struct timespec start, end;
+    
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
+  // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("This is in my crafted queue Thread ID: %lu\n", (unsigned long)tid);
+  // End Check the pthread
+
+   mBufMutex.lock();
+   imuBuf.push(imu_msg);
+   mBufMutex.unlock();
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+
+    double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                        (end.tv_nsec - start.tv_nsec) / 1000.0;
+    double timestamp = imu_msg->header.stamp.toSec();
+    std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+    imu_exe_times.push_back(curr_pair);
+
+// End of Imu Driver
+  return;
+}
+
+ros::CallbackQueue imu_queue;
+
+void ImuGrabber::imu_thread_function()
+{
+    ros::NodeHandle imu_nh;
+
+    imu_nh.setCallbackQueue(&imu_queue);
+    ros::Subscriber sub = imu_nh.subscribe("/imu", 1000, &ImuGrabber::m_GrabImu, this);
+
+    ros::Rate rate(400);  // 10 Hz
+    while (ros::ok())
+    {
+        imu_queue.callAvailable();
+        rate.sleep();
+    }
+}
+////////////////////////////////////////////////////
+
+
+///////////////////////////////////////////////////////////////
+void ImageGrabber::m_GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg)
+{
+    // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("Right image Thread ID: %lu\n", (unsigned long)tid);
+    // End Check the pthread
+
+    struct timespec start, end; 
+    // clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
+    mBufMutexRight.lock();
+    if (!imgRightBuf.empty())
+      imgRightBuf.pop();
+    imgRightBuf.push(img_msg);
+    mBufMutexRight.unlock();
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+    double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                          (end.tv_nsec - start.tv_nsec) / 1000.0;
+    double timestamp = img_msg->header.stamp.toSec();
+    std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+    right_camera_exe_times.push_back(curr_pair);
+
+    // right_camera_exe_times.push_back(time_spent);
+}
+
+ros::CallbackQueue right_img_queue;
+
+void ImageGrabber::right_image_thread_function()
+{
+    ros::NodeHandle right_img_nh;
+
+    right_img_nh.setCallbackQueue(&right_img_queue);
+    ros::Subscriber sub = right_img_nh.subscribe("/camera/right/image_raw", 100, &ImageGrabber::m_GrabImageRight, this);
+
+    ros::Rate rate(40);  // 10 Hz
+    while (ros::ok())
+    {
+        right_img_queue.callAvailable();
+        rate.sleep();
+    }
+}
+////////////////////////////////////////////////////
+
+
+///////////////////////////////////////////////////////////////
+void ImageGrabber::m_GrabImageLeft(const sensor_msgs::ImageConstPtr &img_msg)
+{
+    // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("Left image Thread ID: %lu\n", (unsigned long)tid);
+    // End Check the pthread
+
+    struct timespec start, end;
+      
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
+    mBufMutexLeft.lock();
+    if (!imgLeftBuf.empty())
+      imgLeftBuf.pop();
+    imgLeftBuf.push(img_msg);
+    mBufMutexLeft.unlock();
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+
+    double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                          (end.tv_nsec - start.tv_nsec) / 1000.0;
+
+        
+    double timestamp = img_msg->header.stamp.toSec();
+    std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+    left_camera_exe_times.push_back(curr_pair);
+}
+
+ros::CallbackQueue left_img_queue;
+
+void ImageGrabber::left_image_thread_function()
+{
+    ros::NodeHandle left_img_nh;
+
+    left_img_nh.setCallbackQueue(&left_img_queue);
+    ros::Subscriber sub = left_img_nh.subscribe("/camera/left/image_raw", 100, &ImageGrabber::m_GrabImageLeft, this);
+
+    ros::Rate rate(40);  // 10 Hz
+    while (ros::ok())
+    {
+        left_img_queue.callAvailable();
+        rate.sleep();
+    }
+}
+////////////////////////////////////////////////////
 
 
 int main(int argc, char **argv)
@@ -114,6 +393,7 @@ int main(int argc, char **argv)
   left_camera_exe_times.reserve(3000);
   right_camera_exe_times.reserve(3000);
   tracking_exe_times.reserve(3000);
+  fusion_exe_times.reserve(3000);
   ba_exe_times.reserve(3000);
 
   std::cout << "Hello Whale" << std::endl;
@@ -161,13 +441,35 @@ int main(int argc, char **argv)
     }
 
   // Maximum delay, 5 seconds
-  ros::Subscriber sub_imu = n.subscribe("/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
-  ros::Subscriber sub_img_left = n.subscribe("/camera/left/image_raw", 100, &ImageGrabber::GrabImageLeft,&igb);
-  ros::Subscriber sub_img_right = n.subscribe("/camera/right/image_raw", 100, &ImageGrabber::GrabImageRight,&igb);
+  // ros::Subscriber sub_imu = n.subscribe("/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
+  // ros::Subscriber sub_img_left = n.subscribe("/camera/left/image_raw", 100, &ImageGrabber::GrabImageLeft,&igb);
+  // ros::Subscriber sub_img_right = n.subscribe("/camera/right/image_raw", 100, &ImageGrabber::GrabImageRight,&igb);
 
-  std::thread sync_thread(&ImageGrabber::SyncWithImu,&igb);
+  std::thread sync_thread(&ImageGrabber::SyncWithImu, &igb);
 
-  ros::spin();
+  std::thread imu_grab_thread(&ImuGrabber::imu_thread_function, &imugb);
+  std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
+  std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
+
+  ros::AsyncSpinner spinner(4);  // Use 4 threads
+  spinner.start();
+  ros::waitForShutdown();
+
+  // ros::spin();
+  cout << "I am saving the trajectories and execution times" << endl;
+
+  // Save camera trajectory
+  SLAM.SaveKeyFrameTrajectoryTUM("KeyFrameTrajectory_TUM_Format.txt");
+  SLAM.SaveTrajectoryTUM("FrameTrajectory_TUM_Format.txt");
+  SLAM.SaveTrajectoryKITTI("FrameTrajectory_KITTI_Format.txt");
+
+  
+  // Save the execution times
+  times_saver();
+
+  cout << "Hello Bear" << endl;
+
+  ros::shutdown();
 
   return 0;
 }
@@ -176,6 +478,11 @@ int main(int argc, char **argv)
 
 void ImageGrabber::GrabImageLeft(const sensor_msgs::ImageConstPtr &img_msg)
 {
+
+    // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("Left image Thread ID: %lu\n", (unsigned long)tid);
+  // End Check the pthread
 
   struct timespec start, end;
     
@@ -189,14 +496,22 @@ void ImageGrabber::GrabImageLeft(const sensor_msgs::ImageConstPtr &img_msg)
 
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
 
-  double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
-                        (end.tv_nsec - start.tv_nsec);
-    
-  left_camera_exe_times.push_back(time_spent);
+  double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                        (end.tv_nsec - start.tv_nsec) / 1000.0;
+  
+  double timestamp = img_msg->header.stamp.toSec();
+  std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+
+  left_camera_exe_times.push_back(curr_pair);
 }
 
 void ImageGrabber::GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg)
 {
+    // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("Right image Thread ID: %lu\n", (unsigned long)tid);
+  // End Check the pthread
+
   struct timespec start, end; 
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
 
@@ -207,9 +522,11 @@ void ImageGrabber::GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg)
   mBufMutexRight.unlock();
 
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
-  double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
-                        (end.tv_nsec - start.tv_nsec);
-  right_camera_exe_times.push_back(time_spent);
+  double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                        (end.tv_nsec - start.tv_nsec) / 1000.0;
+  double timestamp = img_msg->header.stamp.toSec();
+  std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+  right_camera_exe_times.push_back(curr_pair);
 }
 
 cv::Mat ImageGrabber::GetImage(const sensor_msgs::ImageConstPtr &img_msg)
@@ -238,6 +555,10 @@ cv::Mat ImageGrabber::GetImage(const sensor_msgs::ImageConstPtr &img_msg)
 
 void ImageGrabber::SyncWithImu()
 {
+
+  struct timespec start, end;
+  double time_spent;
+
   const double maxTimeDiff = 0.01;
   while(1)
   {
@@ -304,6 +625,12 @@ void ImageGrabber::SyncWithImu()
         mClahe->apply(imRight,imRight);
       }
 
+      // // End of Fusion in ms
+      // clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+      // time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
+      //                   (end.tv_nsec - start.tv_nsec) / 1000000.0;
+      // fusion_exe_times.push_back(time_spent);
+
 // Tracking Latency
       struct timespec start, end;
       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
@@ -315,14 +642,18 @@ void ImageGrabber::SyncWithImu()
       }
 
       mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
+
       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+      time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
+                        (end.tv_nsec - start.tv_nsec) / 1000000.0;
 
-      double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
-                        (end.tv_nsec - start.tv_nsec);
-    
-      tracking_exe_times.push_back(time_spent);
+      std::pair<double, double> curr_pair = std::make_pair(tImLeft, time_spent);
+      tracking_exe_times.push_back(curr_pair);
 
-// End of Tracking
+      // End of Tracking
+
+      // // Begin of fusion
+      // clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
 
       std::chrono::milliseconds tSleep(1);
       std::this_thread::sleep_for(tSleep);
@@ -345,6 +676,10 @@ void ImuGrabber::GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
     
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
 
+  // Check the pthread id
+    // pthread_t tid = pthread_self();
+    // printf("Thread ID: %lu\n", (unsigned long)tid);
+  // End Check the pthread
 
    mBufMutex.lock();
    imuBuf.push(imu_msg);
@@ -355,7 +690,9 @@ void ImuGrabber::GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
     double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
                         (end.tv_nsec - start.tv_nsec);
     
-    imu_exe_times.push_back(time_spent);
+    double timestamp = imu_msg->header.stamp.toSec();
+    std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+    imu_exe_times.push_back(curr_pair);
 
     // printf("Thread CPU time used: %lf nanoseconds\n", time_spent);
 

@@ -26,12 +26,7 @@
 
 #include<mutex>
 #include<chrono>
-// Time
-#define _POSIX_C_SOURCE 199309
-#include <stdio.h>
-#include <time.h>
-#include <pthread.h>
-#include <vector>
+
 using namespace std;
 
 namespace ORB_SLAM3
@@ -52,7 +47,6 @@ LocalMapping::LocalMapping(System* pSys, Atlas *pAtlas, const float bMonocular, 
     mNumKFCulling=0;
 
 #ifdef REGISTER_TIMES
-    ba_exe_times.reverse(3000);
     nLBA_exec = 0;
     nLBA_abort = 0;
 #endif
@@ -81,6 +75,10 @@ void LocalMapping::Run()
         // Check if there are keyframes in the queue
         if(CheckNewKeyFrames() && !mbBadImu)
         {
+            // BA Latency in ms
+            struct timespec start, end;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
+
 #ifdef REGISTER_TIMES
             double timeLBA_ms = 0;
             double timeKFCulling_ms = 0;
@@ -124,9 +122,6 @@ void LocalMapping::Run()
 #endif
 
 
-            // BA Latency
-            struct timespec start, end;
-            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
 
             bool b_doneLBA = false;
             int num_FixedKF_BA = 0;
@@ -170,12 +165,14 @@ void LocalMapping::Run()
 
                 }
 
-                double time_spent = (end.tv_sec - start.tv_sec) * 1000000000.0 +
-                        (end.tv_nsec - start.tv_nsec);
+                clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+                double time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
+                        (end.tv_nsec - start.tv_nsec) / 1000000.0;
                 if (!b_doneLBA) time_spent = 0;
-                ba_exe_times.push_back(time_spent);
+                std::pair<double, double> curr_pair = std::make_pair(mpCurrentKeyFrame->mTimeStamp, time_spent);
+                ba_exe_times.push_back(curr_pair);
 
-// End of BA latency
+// End of BA latency in ms
 
 #ifdef REGISTER_TIMES
                 std::chrono::steady_clock::time_point time_EndLBA = std::chrono::steady_clock::now();
