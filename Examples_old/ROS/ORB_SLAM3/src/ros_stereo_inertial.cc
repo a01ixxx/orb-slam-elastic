@@ -52,6 +52,12 @@ vector<std::pair<double, double>> ba_exe_times;
 vector<std::pair<double, double>> fusion_exe_times;
 vector<std::pair<double, double>> loop_closing_exe_times;
 
+
+int image_to_skip = 1;
+int imu_to_skip = 1;
+int image_count = 0;
+int imu_count = 0;
+
 class ImuGrabber
 {
 public:
@@ -220,6 +226,10 @@ int times_saver() {
 void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 {
 
+    if (imu_count++ % imu_to_skip != 0) {
+      return;
+    }
+
     // struct timespec res;
     // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
     //     perror("clock_getres");
@@ -365,18 +375,21 @@ void ImageGrabber::left_image_thread_function()
 ////////////////////////////////////////////////////
 
 
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "Stereo_Inertial");
   ros::NodeHandle n("~");
   ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
   bool bEqual = false;
-  if(argc < 4 || argc > 5)
+  if(argc < 4 || argc > 7)
   {
     cerr << endl << "Usage: rosrun ORB_SLAM3 Stereo_Inertial path_to_vocabulary path_to_settings do_rectify [do_equalize]" << endl;
     ros::shutdown();
     return 1;
   }
+
+  std::cout << "argc : " << argc << endl;
 
   std::string sbRect(argv[3]);
   if(argc==5)
@@ -385,6 +398,12 @@ int main(int argc, char **argv)
     if(sbEqual == "true")
       bEqual = true;
   }
+
+  if (argc == 7) {
+    image_to_skip = std::stoi(argv[5]);
+    imu_to_skip= std::stoi(argv[6]);
+  }
+
 
   // Create SLAM system. It initializes all system threads and gets ready to process frames.
   ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO,true);
@@ -591,7 +610,7 @@ void ImageGrabber::SyncWithImu()
         continue;
       }
       if(tImLeft>mpImuGb->imuBuf.back()->header.stamp.toSec())
-          continue;
+        continue;
 
       this->mBufMutexLeft.lock();
       imLeft = GetImage(imgLeftBuf.front());
@@ -641,7 +660,13 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
 
-      mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
+      if (image_count++ % image_to_skip == 0) {
+        mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
+        // std::cout << "Tracked image " << image_count <<  "vs " << image_to_skip << std::endl;
+      } 
+      // else {
+      //   std::cout << "Skipped image " << std::endl;
+      // }
 
       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
       time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
@@ -664,7 +689,6 @@ void ImageGrabber::SyncWithImu()
 
 void ImuGrabber::GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 {
-
     // struct timespec res;
     // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
     //     perror("clock_getres");
