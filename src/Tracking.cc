@@ -3066,6 +3066,9 @@ bool Tracking::TrackLocalMap()
 bool Tracking::NeedNewKeyFrame()
 {
 
+// TODO move the skip factor here
+
+
     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && !mpAtlas->GetCurrentMap()->isImuInitialized())
     {
         if (mSensor == System::IMU_MONOCULAR && (mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=0.25)
@@ -3189,15 +3192,18 @@ bool Tracking::NeedNewKeyFrame()
 
 
     // Make the Keyframe deterministic
-    // if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
-    //     ba_count = 0;
-    //     return true;
-    // }
-    // else 
-    //     return false;
+    if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
+        ba_count = 0;
+        return true;
+    }
+    else 
+        return false;
     // End - Make the Keyframe deterministic
 
-    if(((c1a||c1b||c1c) && c2)||c3 ||c4)
+
+// This is the original version
+    // if(((c1a||c1b||c1c) && c2)||c3 ||c4)
+    if((((c1a||c1b||c1c) && c2)||c3 ||c4)) && (ba_count++ > ba_to_skip))
     {
         // If the mapping accepts keyframes, insert keyframe.
         // Otherwise send a signal to interrupt BA
@@ -3217,7 +3223,7 @@ bool Tracking::NeedNewKeyFrame()
             }
             else
             {
-                //std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
+                std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
                 return false;
             }
         }

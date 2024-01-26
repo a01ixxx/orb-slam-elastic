@@ -72,6 +72,9 @@ vector<std::pair<double, double>> fusion_exe_times;
 vector<std::pair<double, double>> loop_closing_exe_times;
 
 
+/*
+ * Skip factors to control the periods
+ */
 int image_to_skip = 1;
 int imu_count = 0;
 
@@ -156,6 +159,10 @@ public:
     cv::Ptr<cv::CLAHE> mClahe = cv::createCLAHE(3.0, cv::Size(8, 8));
 };
 
+
+/* Ao Added - time_saver()
+ * For logging execution times profiling results
+ */
 int times_saver() {
 
     // Open a file in write mode
@@ -277,7 +284,7 @@ int times_saver() {
     // End
   std::cout << "Timing information logging finished" << std::endl;
   return 0;
-}
+} // End - time_saver()
 
 ///////////////////////////////////////////////////////////////
 void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
@@ -441,15 +448,16 @@ void ImageGrabber::left_image_thread_function()
 
 void update_cpu_utilization() {
 
-
+#ifdef DEBUG_OVERHEAD
   struct timespec t1, t2, t3, t4, t5;
   float tmp_reader_1, tmp_reader_2, tmp_reader_3;
   double time_spent_1, time_spent_2, time_spent_3, time_spent_4;
+#endif
 
   while (true) {
-
+#ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
-
+#endif
       // Your code to be executed periodically goes here
       read_cpu_stats(&current_stats);
 
@@ -458,35 +466,44 @@ void update_cpu_utilization() {
       unsigned long long total_diff = total2 - total1;
       unsigned long long idle_diff = current_stats.idle - last_stats.idle;
       cpu_utilization = ((double)(total_diff - idle_diff) / total_diff) * 100.0;
-      // std::cout << "cpu_utilization" << cpu_utilization << std::endl;
+#ifdef DEBUG_OVERHEAD
+      std::cout << "cpu_utilization" << cpu_utilization << std::endl;
+#endif
 
     // Emulate the CPU bandwidth
     std::srand(std::time(0));  // Use current time as seed for random generator
     int random_number = std::rand() % 30 + 25;
 
     int current_bandwidth = random_number;
-
+#ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t2);
-
+#endif
     // Get the period for each tasks
     char command[100];
     sprintf(command, "sudo cgset -r cpu.cfs_quota_us=%d orb_cgroup", current_bandwidth * 1000);
     system(command);
     system("sudo cgset -r cpu.cfs_period_us=100000 orb_cgroup");  
 
+#ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t3);
-
+#endif
     elastic_space.assign_periods(current_bandwidth/ 100.0);
 
+#ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t4);
+#endif
 
-
+#ifdef DEBUG_OVERHEAD
     tmp_reader_1 = elastic_space.get_tasks()[0].t;
     tmp_reader_2 = elastic_space.get_tasks()[2].t;
     tmp_reader_3 = elastic_space.get_tasks()[3].t;
 
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t5);
 
+    std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
+    std::cout << "Task 1 period : " << tmp_reader_1 << std::endl;
+    std::cout << "Task 2 period : " << tmp_reader_2 << std::endl;
+    std::cout << "Task 3 period : " << tmp_reader_3 << std::endl;
 
     time_spent_1 = (t2.tv_sec - t1.tv_sec) * 1000000.0 +
                           (t2.tv_nsec - t1.tv_nsec) / 1000.0;
@@ -499,7 +516,7 @@ void update_cpu_utilization() {
 
     time_spent_4 = (t5.tv_sec - t4.tv_sec) * 1000000.0 +
                           (t5.tv_nsec - t4.tv_nsec) / 1000.0;
-
+#endif
 
     // std::cout << "Time (1) : " << time_spent_1 << std::endl;
     // std::cout << "Time (2) : " << time_spent_2 << std::endl;
@@ -510,14 +527,11 @@ void update_cpu_utilization() {
           std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
     } else {
 
-    // imu_to_skip = elastic_space.get_tasks()[0].t / 5; 
-    // image_to_skip = (elastic_space.get_tasks()[1].t) / 50; 
-    // ba_to_skip =  elastic_space.get_tasks()[2].t / (50 * image_to_skip);
+    imu_to_skip = elastic_space.get_tasks()[0].t / 5; 
+    image_to_skip = (elastic_space.get_tasks()[1].t) / 50; 
+    // BA skip should account for image's skip factor
+    ba_to_skip =  elastic_space.get_tasks()[2].t / (50 * image_to_skip);
 
-    // std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
-    // std::cout << "Task 1 period : " << tmp_reader_1 << std::endl;
-    // std::cout << "Task 2 period : " << tmp_reader_2 << std::endl;
-    // std::cout << "Task 3 period : " << tmp_reader_3 << std::endl;
     }
 
     /////////////////////
@@ -569,8 +583,6 @@ int main(int argc, char **argv)
   system(command);
 
   // End - Set the CGROUP
-
-
 
 // To collect elasticity data
 
@@ -735,7 +747,7 @@ void ImageGrabber::GrabImageRight(const sensor_msgs::ImageConstPtr &img_msg)
     // Check the pthread id
     // pthread_t tid = pthread_self();
     // printf("Right image Thread ID: %lu\n", (unsigned long)tid);
-  // End Check the pthread
+    // End Check the pthread
 
   struct timespec start, end; 
   clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
@@ -866,10 +878,10 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
 
-      // if (image_count++ % image_to_skip == 0) {
+      if (image_count++ % image_to_skip == 0) {
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
         // std::cout << "Tracked image " << image_count <<  "vs " << image_to_skip << std::endl;
-      // } 
+      } 
       // else {
       //   std::cout << "Skipped image " << std::endl;
       // }
