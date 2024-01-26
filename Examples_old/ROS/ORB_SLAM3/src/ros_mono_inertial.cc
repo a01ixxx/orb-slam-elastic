@@ -44,6 +44,13 @@ vector<std::pair<double, double>> tracking_exe_times;
 vector<std::pair<double, double>> ba_exe_times;
 vector<std::pair<double, double>> loop_closing_exe_times;
 
+bool imu_period_need_update = false;
+bool image_period_need_update = false;
+bool ba_period_need_update = false;
+
+int ba_to_skip = 1;
+int ba_count = 0;
+
 class ImuGrabber
 {
 public:

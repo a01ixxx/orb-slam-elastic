@@ -115,10 +115,15 @@ target_link_libraries(Mono_Inertial
 ${LIBS}
 )
 
+
 # Node for stereo-inertial camera
 rosbuild_add_executable(Stereo_Inertial
 src/ros_stereo_inertial.cc
+elastic/harmonic.cc
+elastic/task.cc
 )
+
+target_include_directories(Stereo_Inertial PRIVATE elastic)
 
 target_link_libraries(Stereo_Inertial
 ${LIBS}

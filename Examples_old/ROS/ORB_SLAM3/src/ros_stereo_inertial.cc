@@ -24,6 +24,7 @@
 #include<queue>
 #include<thread>
 #include<mutex>
+#include <unistd.h>
 
 // For saving files
 #include <fstream>
@@ -40,10 +41,28 @@
 #include"../../../include/System.h"
 #include"../include/ImuTypes.h"
 
+// For elastic scheduling
+#include "harmonic.h"
+
+#define DEBUG_OVERHEAD
+// #define DEBUG_HARMONIC
+
 using namespace std;
 
 
 // Ao added
+///////////////
+// Structure to store CPU statistics
+typedef struct {
+    unsigned long long user;
+    unsigned long long nice;
+    unsigned long long system;
+    unsigned long long idle;
+    unsigned long long iowait;
+    unsigned long long irq;
+    unsigned long long softirq;
+} CPUStats;
+
 vector<std::pair<double, double>> imu_exe_times;
 vector<std::pair<double, double>> left_camera_exe_times;
 vector<std::pair<double, double>> right_camera_exe_times;
@@ -54,9 +73,47 @@ vector<std::pair<double, double>> loop_closing_exe_times;
 
 
 int image_to_skip = 1;
+int imu_count = 0;
+
 int imu_to_skip = 1;
 int image_count = 0;
-int imu_count = 0;
+
+int ba_to_skip = 1;
+int ba_count = 0;
+
+Harmonic_Elastic elastic_space {3};
+// First Task -- IMU
+// Second Task -- Image
+// Third Task -- BA
+
+bool imu_period_need_update = false;
+bool image_period_need_update = false;
+bool ba_period_need_update = false;
+
+CPUStats last_stats, current_stats;
+double cpu_utilization;
+
+
+// Function to read CPU statistics from /proc/stat
+void read_cpu_stats(CPUStats *stats) {
+    FILE *stat_file = fopen("/proc/stat", "r");
+    if (!stat_file) {
+        perror("Failed to open /proc/stat");
+        exit(EXIT_FAILURE);
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), stat_file)) {
+        if (strncmp(line, "cpu ", 4) == 0) {
+            sscanf(line + 4, "%llu %llu %llu %llu %llu %llu %llu",
+                   &stats->user, &stats->nice, &stats->system, &stats->idle,
+                   &stats->iowait, &stats->irq, &stats->softirq);
+            break;
+        }
+    }
+
+    fclose(stat_file);
+}
 
 class ImuGrabber
 {
@@ -225,11 +282,19 @@ int times_saver() {
 ///////////////////////////////////////////////////////////////
 void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 {
+    // if(imu_period_need_update == true) {
+    //   // set up the period
+
+    //   imu_period_need_update = false;
+    // }
 
     if (imu_count++ % imu_to_skip != 0) {
       return;
     }
 
+#ifdef DEBUG_HARMONIC
+    std::cout << "imu to skip" << imu_to_skip << std::endl;
+#endif
     // struct timespec res;
     // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
     //     perror("clock_getres");
@@ -374,6 +439,101 @@ void ImageGrabber::left_image_thread_function()
 }
 ////////////////////////////////////////////////////
 
+void update_cpu_utilization() {
+
+
+  struct timespec t1, t2, t3, t4, t5;
+  float tmp_reader_1, tmp_reader_2, tmp_reader_3;
+  double time_spent_1, time_spent_2, time_spent_3, time_spent_4;
+
+  while (true) {
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t1);
+
+      // Your code to be executed periodically goes here
+      read_cpu_stats(&current_stats);
+
+      unsigned long long total1 = last_stats.user + last_stats.nice + last_stats.system + last_stats.idle + last_stats.iowait + last_stats.irq + last_stats.softirq;
+      unsigned long long total2 = current_stats.user + current_stats.nice + current_stats.system + current_stats.idle + current_stats.iowait + current_stats.irq + current_stats.softirq;
+      unsigned long long total_diff = total2 - total1;
+      unsigned long long idle_diff = current_stats.idle - last_stats.idle;
+      cpu_utilization = ((double)(total_diff - idle_diff) / total_diff) * 100.0;
+      // std::cout << "cpu_utilization" << cpu_utilization << std::endl;
+
+    // Emulate the CPU bandwidth
+    std::srand(std::time(0));  // Use current time as seed for random generator
+    int random_number = std::rand() % 30 + 25;
+
+    int current_bandwidth = random_number;
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t2);
+
+    // Get the period for each tasks
+    char command[100];
+    sprintf(command, "sudo cgset -r cpu.cfs_quota_us=%d orb_cgroup", current_bandwidth * 1000);
+    system(command);
+    system("sudo cgset -r cpu.cfs_period_us=100000 orb_cgroup");  
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t3);
+
+    elastic_space.assign_periods(current_bandwidth/ 100.0);
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t4);
+
+
+    tmp_reader_1 = elastic_space.get_tasks()[0].t;
+    tmp_reader_2 = elastic_space.get_tasks()[2].t;
+    tmp_reader_3 = elastic_space.get_tasks()[3].t;
+
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t5);
+
+
+    time_spent_1 = (t2.tv_sec - t1.tv_sec) * 1000000.0 +
+                          (t2.tv_nsec - t1.tv_nsec) / 1000.0;
+    
+    time_spent_2 = (t3.tv_sec - t2.tv_sec) * 1000000.0 +
+                          (t3.tv_nsec - t2.tv_nsec) / 1000.0;
+
+    time_spent_3 = (t4.tv_sec - t3.tv_sec) * 1000000.0 +
+                          (t4.tv_nsec - t3.tv_nsec) / 1000.0;
+
+    time_spent_4 = (t5.tv_sec - t4.tv_sec) * 1000000.0 +
+                          (t5.tv_nsec - t4.tv_nsec) / 1000.0;
+
+
+    // std::cout << "Time (1) : " << time_spent_1 << std::endl;
+    // std::cout << "Time (2) : " << time_spent_2 << std::endl;
+    // std::cout << "Time (3) : " << time_spent_3 << std::endl;
+    // std::cout << "Time (4) : " << time_spent_4 << std::endl;
+
+    if (elastic_space.get_tasks()[0].t == 0) {
+          std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
+    } else {
+
+    // imu_to_skip = elastic_space.get_tasks()[0].t / 5; 
+    // image_to_skip = (elastic_space.get_tasks()[1].t) / 50; 
+    // ba_to_skip =  elastic_space.get_tasks()[2].t / (50 * image_to_skip);
+
+    // std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
+    // std::cout << "Task 1 period : " << tmp_reader_1 << std::endl;
+    // std::cout << "Task 2 period : " << tmp_reader_2 << std::endl;
+    // std::cout << "Task 3 period : " << tmp_reader_3 << std::endl;
+    }
+
+    /////////////////////
+    last_stats.user = current_stats.user;
+    last_stats.nice = current_stats.nice;
+    last_stats.system = current_stats.system;
+    last_stats.idle = current_stats.idle;
+    last_stats.iowait = current_stats.iowait;
+    last_stats.irq = current_stats.irq;
+    last_stats.softirq = current_stats.softirq;
+    ////////////////////
+    std::this_thread::sleep_for(std::chrono::seconds(1)); // Sleep for 1 second
+  }
+
+
+}
 
 
 int main(int argc, char **argv)
@@ -389,7 +549,30 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  std::cout << "argc : " << argc << endl;
+// Set the RR scheduling
+    // pid_t pid = getpid();
+    // struct sched_param param;
+    // param.sched_priority = 20;
+    // if (sched_setscheduler(pid, SCHED_RR, &param) == -1) {
+    //     perror("sched_setscheduler");
+    //     return 1;
+    // }
+// End - Set the RR scheduling
+
+  // Set the CGROUP
+
+  // Step 1: Create a cgroup
+  system("sudo cgcreate -g cpu:orb_cgroup");
+
+  char command[100];
+  sprintf(command, "sudo cgclassify -g cpu:orb_cgroup %d", getpid());
+  system(command);
+
+  // End - Set the CGROUP
+
+
+
+// To collect elasticity data
 
   std::string sbRect(argv[3]);
   if(argc==5)
@@ -403,11 +586,33 @@ int main(int argc, char **argv)
     image_to_skip = std::stoi(argv[5]);
     imu_to_skip= std::stoi(argv[6]);
   }
+// End - To collect elasticity data
+
+
+// First Task -- IMU
+// Second Task -- Image
+// Third Task -- BA
+
+/*
+ * Profiled results
+ */
+// IMU: T_min = 5, T_max = 20, E = C^2/8.761E-4 (where C is execution time in milliseconds)
+// Image, you can use either:
+// T_min = 50, T_max = 150, E = C^2/0.4869
+// T_min = 50, T_max = 200, E = C^2/2.541
+// BA: T_min = 50, T_max = 200, E = C^2/0.1643
+
+  //Task takes T_min, T_max, C, E
+  elastic_space.add_task(Task {5, 20, 0.0015, 0.25682});
+  elastic_space.add_task(Task {50, 200, 31.3, 385.6});
+  elastic_space.add_task(Task {50, 1000, 204.55, 765098.615});
+  elastic_space.generate();
 
 
   // Create SLAM system. It initializes all system threads and gets ready to process frames.
   ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO,true);
 
+// Avoid runtime re-allocation
   imu_exe_times.reserve(30000);
   left_camera_exe_times.reserve(3000);
   right_camera_exe_times.reserve(3000);
@@ -469,6 +674,7 @@ int main(int argc, char **argv)
   std::thread imu_grab_thread(&ImuGrabber::imu_thread_function, &imugb);
   std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
   std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
+  std::thread t(update_cpu_utilization);
 
   ros::AsyncSpinner spinner(4);  // Use 4 threads
   spinner.start();
@@ -660,10 +866,10 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
 
-      if (image_count++ % image_to_skip == 0) {
+      // if (image_count++ % image_to_skip == 0) {
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
         // std::cout << "Tracked image " << image_count <<  "vs " << image_to_skip << std::endl;
-      } 
+      // } 
       // else {
       //   std::cout << "Skipped image " << std::endl;
       // }

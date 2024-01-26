@@ -3061,15 +3061,10 @@ bool Tracking::TrackLocalMap()
     }
 }
 
-// int tmp_count = 1;
+
 
 bool Tracking::NeedNewKeyFrame()
 {
-
-    // if (tmp_count++ % 14 == 0)
-    //     return true;
-    // else 
-    //     return false;
 
     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && !mpAtlas->GetCurrentMap()->isImuInitialized())
     {
@@ -3176,12 +3171,12 @@ bool Tracking::NeedNewKeyFrame()
     {
         if (mSensor==System::IMU_MONOCULAR)
         {
-            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=2.5)
+            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=1.0)
                 c3 = true;
         }
         else if (mSensor==System::IMU_STEREO || mSensor == System::IMU_RGBD)
         {
-            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=2.5)
+            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=1.0)
                 c3 = true;
         }
     }
@@ -3191,6 +3186,16 @@ bool Tracking::NeedNewKeyFrame()
         c4=true;
     else
         c4=false;
+
+
+    // Make the Keyframe deterministic
+    // if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
+    //     ba_count = 0;
+    //     return true;
+    // }
+    // else 
+    //     return false;
+    // End - Make the Keyframe deterministic
 
     if(((c1a||c1b||c1c) && c2)||c3 ||c4)
     {
