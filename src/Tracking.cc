@@ -3190,7 +3190,7 @@ bool Tracking::NeedNewKeyFrame()
     else
         c4=false;
 
-
+#ifdef ELASTIC_SCHED
     // Make the Keyframe deterministic
     if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
         ba_count = 0;
@@ -3199,11 +3199,10 @@ bool Tracking::NeedNewKeyFrame()
     else 
         return false;
     // End - Make the Keyframe deterministic
-
+#endif
 
 // This is the original version
-    // if(((c1a||c1b||c1c) && c2)||c3 ||c4)
-    if((((c1a||c1b||c1c) && c2)||c3 ||c4)) && (ba_count++ > ba_to_skip))
+    if(((c1a||c1b||c1c) && c2)||c3 ||c4)
     {
         // If the mapping accepts keyframes, insert keyframe.
         // Otherwise send a signal to interrupt BA

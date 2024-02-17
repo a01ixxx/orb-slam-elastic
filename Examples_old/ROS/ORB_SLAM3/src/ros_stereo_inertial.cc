@@ -44,8 +44,10 @@
 // For elastic scheduling
 #include "harmonic.h"
 
-#define DEBUG_OVERHEAD
+// #define DEBUG_OVERHEAD
 // #define DEBUG_HARMONIC
+#define ELASTIC_SCHED
+
 
 using namespace std;
 
@@ -294,10 +296,11 @@ void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 
     //   imu_period_need_update = false;
     // }
-
+#ifdef ELASTIC_SCHED
     if (imu_count++ % imu_to_skip != 0) {
       return;
     }
+#endif
 
 #ifdef DEBUG_HARMONIC
     std::cout << "imu to skip" << imu_to_skip << std::endl;
@@ -601,23 +604,15 @@ int main(int argc, char **argv)
 // End - To collect elasticity data
 
 
+
+// @FIXME to change the parameter of the elastic model
 // First Task -- IMU
 // Second Task -- Image
 // Third Task -- BA
-
-/*
- * Profiled results
- */
-// IMU: T_min = 5, T_max = 20, E = C^2/8.761E-4 (where C is execution time in milliseconds)
-// Image, you can use either:
-// T_min = 50, T_max = 150, E = C^2/0.4869
-// T_min = 50, T_max = 200, E = C^2/2.541
-// BA: T_min = 50, T_max = 200, E = C^2/0.1643
-
   //Task takes T_min, T_max, C, E
-  elastic_space.add_task(Task {5, 20, 0.0015, 0.25682});
-  elastic_space.add_task(Task {50, 200, 31.3, 385.6});
-  elastic_space.add_task(Task {50, 1000, 204.55, 765098.615});
+  elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
+  elastic_space.add_task(Task {50, 200, 31.3, 411});
+  elastic_space.add_task(Task {50, 1000, 270, 462000});
   elastic_space.generate();
 
 
@@ -877,14 +872,15 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imLeft,imLeft,M1l,M2l,cv::INTER_LINEAR);
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
-
+#ifdef ELASTIC_SCHED
       if (image_count++ % image_to_skip == 0) {
+#endif
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
-        // std::cout << "Tracked image " << image_count <<  "vs " << image_to_skip << std::endl;
+
+#ifdef ELASTIC_SCHED      
       } 
-      // else {
-      //   std::cout << "Skipped image " << std::endl;
-      // }
+#endif
+
 
       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
       time_spent = (end.tv_sec - start.tv_sec) * 1000.0 +
