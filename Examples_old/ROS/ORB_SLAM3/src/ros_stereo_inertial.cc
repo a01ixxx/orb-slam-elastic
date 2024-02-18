@@ -78,10 +78,10 @@ vector<std::pair<double, double>> loop_closing_exe_times;
  * Skip factors to control the periods
  */
 int image_to_skip = 1;
-int imu_count = 0;
+int image_count = 0;
 
 int imu_to_skip = 1;
-int image_count = 0;
+int imu_count = 0;
 
 int ba_to_skip = 1;
 int ba_count = 0;
@@ -252,22 +252,6 @@ int times_saver() {
     // Close the file
     ba_exe_times_file.close();
     // End
-
-    // Open a file in write mode
-    // std::ofstream fusion_exe_times_file("fusion_exe_times_file.txt");
-
-    // // Check if the file is open
-    // if (!fusion_exe_times_file.is_open()) {
-    //     std::cerr << "Unable to open file";
-    //     return 1;
-    // }
-    // // Write the vector data to the file
-    // for (const auto& val : fusion_exe_times) {
-    //     fusion_exe_times_file << setprecision(19) << val.first << setprecision(6) << "," << val.second << '\n';
-    // }
-    // // Close the file
-    // fusion_exe_times_file.close();
-    // // End
 
     // Open a file in write mode
     std::ofstream loop_closing_exe_times_file("ms_loop_closing_exe_times_file.txt");
@@ -576,8 +560,9 @@ int main(int argc, char **argv)
     // }
 // End - Set the RR scheduling
 
-  // Set the CGROUP
 
+#ifdef ELASTIC_SCHED
+  // Set the CGROUP
   // Step 1: Create a cgroup
   system("sudo cgcreate -g cpu:orb_cgroup");
 
@@ -586,6 +571,7 @@ int main(int argc, char **argv)
   system(command);
 
   // End - Set the CGROUP
+#endif
 
 // To collect elasticity data
 
@@ -681,7 +667,10 @@ int main(int argc, char **argv)
   std::thread imu_grab_thread(&ImuGrabber::imu_thread_function, &imugb);
   std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
   std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
+
+#ifdef ELASTIC_SCHED
   std::thread t(update_cpu_utilization);
+#endif
 
   ros::AsyncSpinner spinner(4);  // Use 4 threads
   spinner.start();
@@ -876,7 +865,6 @@ void ImageGrabber::SyncWithImu()
       if (image_count++ % image_to_skip == 0) {
 #endif
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
-
 #ifdef ELASTIC_SCHED      
       } 
 #endif
@@ -890,9 +878,6 @@ void ImageGrabber::SyncWithImu()
       tracking_exe_times.push_back(curr_pair);
 
       // End of Tracking
-
-      // // Begin of fusion
-      // clock_gettime(CLOCK_THREAD_CPUTIME_ID, &start);
 
       std::chrono::milliseconds tSleep(1);
       std::this_thread::sleep_for(tSleep);
