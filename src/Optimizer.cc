@@ -282,6 +282,8 @@ void Optimizer::BundleAdjustment(const vector<KeyFrame *> &vpKFs, const vector<M
 
     // Recover optimized data
     //Keyframes
+    // Ao
+    // int keyframe_size = vpKFs.size();
     for(size_t i=0; i<vpKFs.size(); i++)
     {
         KeyFrame* pKF = vpKFs[i];

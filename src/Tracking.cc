@@ -3190,10 +3190,37 @@ bool Tracking::NeedNewKeyFrame()
     else
         c4=false;
 
+
 #ifdef ELASTIC_SCHED
     // Make the Keyframe deterministic
     if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
-        ba_count = 0;
+        
+        // If the mapping accepts keyframes, insert keyframe.
+        // Otherwise send a signal to interrupt BA
+        if(bLocalMappingIdle || mpLocalMapper->IsInitializing())
+        {
+            ba_count = 0;
+            return true;
+        }
+        else
+        {
+            mpLocalMapper->InterruptBA();
+            if(mSensor!=System::MONOCULAR  && mSensor!=System::IMU_MONOCULAR)
+            {
+                if(mpLocalMapper->KeyframesInQueue()<3) {
+                    ba_count = 0;
+                    return true;
+                }
+                else
+                    return false;
+            }
+            else
+            {
+                std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
+                return false;
+            }
+        }
+
         return true;
     }
     else 
