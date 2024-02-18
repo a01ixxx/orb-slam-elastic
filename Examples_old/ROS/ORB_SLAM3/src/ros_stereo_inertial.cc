@@ -45,8 +45,8 @@
 #include "harmonic.h"
 
 // #define DEBUG_OVERHEAD
-// #define DEBUG_HARMONIC
-// #define ELASTIC_SCHED
+#define DEBUG_HARMONIC
+#define ELASTIC_SCHED   
 
 
 using namespace std;
@@ -281,14 +281,17 @@ void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
     //   imu_period_need_update = false;
     // }
 #ifdef ELASTIC_SCHED
-    if (imu_count++ % imu_to_skip != 0) {
+    if (++imu_count < imu_to_skip) {
+      imu_count = 0;
+
+#ifdef DEBUG_HARMONIC
+    std::cout << "imu frame skiped" << imu_to_skip << std::endl;
+#endif
       return;
     }
 #endif
 
-#ifdef DEBUG_HARMONIC
-    std::cout << "imu to skip" << imu_to_skip << std::endl;
-#endif
+
     // struct timespec res;
     // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
     //     perror("clock_getres");
@@ -309,13 +312,13 @@ void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
    imuBuf.push(imu_msg);
    mBufMutex.unlock();
 
-    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);
 
-    double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
-                        (end.tv_nsec - start.tv_nsec) / 1000.0;
-    double timestamp = imu_msg->header.stamp.toSec();
-    std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
-    imu_exe_times.push_back(curr_pair);
+  double time_spent = (end.tv_sec - start.tv_sec) * 1000000.0 +
+                      (end.tv_nsec - start.tv_nsec) / 1000.0;
+  double timestamp = imu_msg->header.stamp.toSec();
+  std::pair<double, double> curr_pair = std::make_pair(timestamp, time_spent);
+  imu_exe_times.push_back(curr_pair);
 
 // End of Imu Driver
   return;
@@ -459,7 +462,7 @@ void update_cpu_utilization() {
 
     // Emulate the CPU bandwidth
     std::srand(std::time(0));  // Use current time as seed for random generator
-    int random_number = std::rand() % 30 + 25;
+    int random_number = std::rand() % 25 + 45;
 
     int current_bandwidth = random_number;
 #ifdef DEBUG_OVERHEAD
@@ -470,6 +473,7 @@ void update_cpu_utilization() {
     sprintf(command, "sudo cgset -r cpu.cfs_quota_us=%d orb_cgroup", current_bandwidth * 1000);
     system(command);
     system("sudo cgset -r cpu.cfs_period_us=100000 orb_cgroup");  
+    std::cout << "The CPU Bandwidth is modified." << std::endl;
 
 #ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t3);
@@ -520,6 +524,12 @@ void update_cpu_utilization() {
     ba_to_skip =  elastic_space.get_tasks()[2].t / (50 * image_to_skip);
 
     }
+    // imu_to_skip = 1;
+    // image_to_skip = 1;
+    // std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
+    // std::cout << "imu_to_skip : " << imu_to_skip << std::endl;
+    // std::cout << "image_to_skip : " << image_to_skip << std::endl;
+    // std::cout << "ba_to_skip : " << ba_to_skip << std::endl;
 
     /////////////////////
     last_stats.user = current_stats.user;
@@ -561,7 +571,7 @@ int main(int argc, char **argv)
 // End - Set the RR scheduling
 
 
-#ifdef ELASTIC_SCHED
+// #ifdef ELASTIC_SCHED
   // Set the CGROUP
   // Step 1: Create a cgroup
   system("sudo cgcreate -g cpu:orb_cgroup");
@@ -571,7 +581,7 @@ int main(int argc, char **argv)
   system(command);
 
   // End - Set the CGROUP
-#endif
+// #endif
 
 // To collect elasticity data
 
@@ -597,9 +607,14 @@ int main(int argc, char **argv)
 // Third Task -- BA
   //Task takes T_min, T_max, C, E
   elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
-  elastic_space.add_task(Task {50, 200, 31.3, 411});
-  elastic_space.add_task(Task {50, 1000, 270, 462000});
+  elastic_space.add_task(Task {50, 100, 36.5, 4006});
+  elastic_space.add_task(Task {50, 1200, 163,  114000});
   elastic_space.generate();
+
+  // elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
+  // elastic_space.add_task(Task {50, 100, 19.5, 4006});
+  // elastic_space.add_task(Task {50, 800, 163,  114000});
+  // elastic_space.generate();
 
 
   // Create SLAM system. It initializes all system threads and gets ready to process frames.
@@ -668,9 +683,9 @@ int main(int argc, char **argv)
   std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
   std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
 
-#ifdef ELASTIC_SCHED
+// #ifdef ELASTIC_SCHED
   std::thread t(update_cpu_utilization);
-#endif
+// #endif
 
   ros::AsyncSpinner spinner(4);  // Use 4 threads
   spinner.start();
@@ -862,11 +877,15 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
 #ifdef ELASTIC_SCHED
-      if (image_count++ % image_to_skip == 0) {
+      if (++image_count >= image_to_skip) {
 #endif
+        image_count = 0;
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
+
 #ifdef ELASTIC_SCHED      
-      } 
+      } else {
+        std::cout << "image frame skipped" << std::endl;
+      }
 #endif
 
 

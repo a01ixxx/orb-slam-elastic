@@ -3068,6 +3068,7 @@ bool Tracking::NeedNewKeyFrame()
 
 // TODO move the skip factor here
 
+    ++ba_count;     
 
     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && !mpAtlas->GetCurrentMap()->isImuInitialized())
     {
@@ -3193,7 +3194,7 @@ bool Tracking::NeedNewKeyFrame()
 
 #ifdef ELASTIC_SCHED
     // Make the Keyframe deterministic
-    if ((((c1a||c1b||c1c) && c2)||c3 ||c4) && (ba_count++ > ba_to_skip)) {
+    if ((((c1a||c1b||c1c) && c2)||c3 ||c4) ||  (ba_count >= ba_to_skip)) {
         
         // If the mapping accepts keyframes, insert keyframe.
         // Otherwise send a signal to interrupt BA
@@ -3220,15 +3221,17 @@ bool Tracking::NeedNewKeyFrame()
                 return false;
             }
         }
-
+        ba_count = 0;
         return true;
     }
     else 
         return false;
     // End - Make the Keyframe deterministic
-#endif
+
+#else
 
 // This is the original version
+
     if(((c1a||c1b||c1c) && c2)||c3 ||c4)
     {
         // If the mapping accepts keyframes, insert keyframe.
@@ -3256,6 +3259,7 @@ bool Tracking::NeedNewKeyFrame()
     }
     else
         return false;
+#endif
 }
 
 void Tracking::CreateNewKeyFrame()
