@@ -46,6 +46,7 @@
 
 // #define DEBUG_OVERHEAD
 #define DEBUG_HARMONIC
+
 #define ELASTIC_SCHED   
 
 
@@ -683,9 +684,9 @@ int main(int argc, char **argv)
   std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
   std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
 
-// #ifdef ELASTIC_SCHED
+
+// Comment out this for execution time profilings
   std::thread t(update_cpu_utilization);
-// #endif
 
   ros::AsyncSpinner spinner(4);  // Use 4 threads
   spinner.start();
