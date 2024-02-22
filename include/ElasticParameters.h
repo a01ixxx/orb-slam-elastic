@@ -6,7 +6,7 @@
 // #define DEBUG_OVERHEAD
 // #define DEBUG_HARMONIC
 // #define ELASTIC_SCHED   
-#define RESTRICT_BANDWIDTH
+// #define RESTRICT_BANDWIDTH
 
 #define BANDWIDTH_RANGE 25
 #define BANDWIDTH_MIN 50
