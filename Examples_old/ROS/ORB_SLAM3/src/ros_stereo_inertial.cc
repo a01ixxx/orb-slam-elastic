@@ -618,13 +618,13 @@ int main(int argc, char **argv)
 // Second Task -- Image
 // Third Task -- BA
   //Task takes T_min, T_max, C, E
+  elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
+  elastic_space.add_task(Task {50, 200, 31.3, 4006});
+  elastic_space.add_task(Task {50, 1200, 270,  114000});
+
   // elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
   // elastic_space.add_task(Task {50, 200, 19.5, 4006});
-  // elastic_space.add_task(Task {50, 1200, 270,  114000});
-
-  elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
-  elastic_space.add_task(Task {50, 200, 19.5, 4006});
-  elastic_space.add_task(Task {50, 1200, 163,  114000});
+  // elastic_space.add_task(Task {50, 1200, 163,  114000});
   elastic_space.generate();
 
 #endif
