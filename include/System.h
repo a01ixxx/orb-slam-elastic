@@ -57,6 +57,7 @@ extern vector<std::pair<double, double>> loop_closing_exe_times;
 
 extern bool ba_period_need_update;
 
+//For elastic scheduling
 extern int ba_to_skip;
 extern int ba_count;
 

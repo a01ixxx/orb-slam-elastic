@@ -43,11 +43,7 @@
 
 // For elastic scheduling
 #include "harmonic.h"
-
-// #define DEBUG_OVERHEAD
-#define DEBUG_HARMONIC
-
-#define ELASTIC_SCHED   
+#include"../../../include/ElasticParameters.h"
 
 
 using namespace std;
@@ -87,7 +83,9 @@ int imu_count = 0;
 int ba_to_skip = 1;
 int ba_count = 0;
 
+#ifdef ELASTIC_SCHED
 Harmonic_Elastic elastic_space {3};
+#endif
 // First Task -- IMU
 // Second Task -- Image
 // Third Task -- BA
@@ -281,18 +279,15 @@ void ImuGrabber::m_GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
 
     //   imu_period_need_update = false;
     // }
-#ifdef ELASTIC_SCHED
     if (++imu_count < imu_to_skip) {
-      imu_count = 0;
 
 #ifdef DEBUG_HARMONIC
-    std::cout << "imu frame skiped" << imu_to_skip << std::endl;
+    std::cout << "imu frame skipped" << imu_to_skip << std::endl;
 #endif
       return;
     }
-#endif
 
-
+    imu_count = 0;
     // struct timespec res;
     // if (clock_getres(CLOCK_THREAD_CPUTIME_ID, &res) == -1) {
     //     perror("clock_getres");
@@ -463,7 +458,7 @@ void update_cpu_utilization() {
 
     // Emulate the CPU bandwidth
     std::srand(std::time(0));  // Use current time as seed for random generator
-    int random_number = std::rand() % 25 + 45;
+    int random_number = std::rand() % (BANDWIDTH_RANGE + 1) + BANDWIDTH_MIN;
 
     int current_bandwidth = random_number;
 #ifdef DEBUG_OVERHEAD
@@ -474,28 +469,32 @@ void update_cpu_utilization() {
     sprintf(command, "sudo cgset -r cpu.cfs_quota_us=%d orb_cgroup", current_bandwidth * 1000);
     system(command);
     system("sudo cgset -r cpu.cfs_period_us=100000 orb_cgroup");  
-    std::cout << "The CPU Bandwidth is modified." << std::endl;
+    std::cout << "The CPU Bandwidth is modified to " << current_bandwidth << std::endl;
 
 #ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t3);
 #endif
+#ifdef ELASTIC_SCHED
     elastic_space.assign_periods(current_bandwidth/ 100.0);
+#endif
 
 #ifdef DEBUG_OVERHEAD
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t4);
 #endif
 
 #ifdef DEBUG_OVERHEAD
-    tmp_reader_1 = elastic_space.get_tasks()[0].t;
-    tmp_reader_2 = elastic_space.get_tasks()[2].t;
-    tmp_reader_3 = elastic_space.get_tasks()[3].t;
 
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t5);
+#ifdef ELASTIC_SCHED
+    tmp_reader_1 = elastic_space.get_tasks()[0].t;
+    tmp_reader_2 = elastic_space.get_tasks()[1].t;
+    tmp_reader_3 = elastic_space.get_tasks()[2].t;
 
     std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
     std::cout << "Task 1 period : " << tmp_reader_1 << std::endl;
     std::cout << "Task 2 period : " << tmp_reader_2 << std::endl;
     std::cout << "Task 3 period : " << tmp_reader_3 << std::endl;
+#endif
 
     time_spent_1 = (t2.tv_sec - t1.tv_sec) * 1000000.0 +
                           (t2.tv_nsec - t1.tv_nsec) / 1000.0;
@@ -515,16 +514,23 @@ void update_cpu_utilization() {
     // std::cout << "Time (3) : " << time_spent_3 << std::endl;
     // std::cout << "Time (4) : " << time_spent_4 << std::endl;
 
+#ifdef ELASTIC_SCHED
     if (elastic_space.get_tasks()[0].t == 0) {
           std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
     } else {
 
-    imu_to_skip = elastic_space.get_tasks()[0].t / 5; 
-    image_to_skip = (elastic_space.get_tasks()[1].t) / 50; 
+    auto & tasks = elastic_space.get_tasks();
+    imu_to_skip = tasks[0].t / 5; 
+    image_to_skip = (tasks[1].t) / 50; 
     // BA skip should account for image's skip factor
-    ba_to_skip =  elastic_space.get_tasks()[2].t / (50 * image_to_skip);
-
+    ba_to_skip =  tasks[2].t / (50 * image_to_skip);
+#ifdef DEBUG_HARMONIC
+    std::cout << "Adjusted periods: " << tasks[0].t << ' ' << tasks[1].t << ' ' << tasks[2].t << std::endl;
+    std::cout << "Skipping: " << imu_to_skip << ' ' << image_to_skip << ' ' << ba_to_skip << std::endl;
+#endif
     }
+#endif
+
     // imu_to_skip = 1;
     // image_to_skip = 1;
     // std::cout << "Current bandwidth : " << current_bandwidth << std::endl;
@@ -572,7 +578,7 @@ int main(int argc, char **argv)
 // End - Set the RR scheduling
 
 
-// #ifdef ELASTIC_SCHED
+#ifdef RESTRICT_BANDWIDTH
   // Set the CGROUP
   // Step 1: Create a cgroup
   system("sudo cgcreate -g cpu:orb_cgroup");
@@ -580,9 +586,14 @@ int main(int argc, char **argv)
   char command[100];
   sprintf(command, "sudo cgclassify -g cpu:orb_cgroup %d", getpid());
   system(command);
+  //Set current bandwidth back to 100
+    sprintf(command, "sudo cgset -r cpu.cfs_quota_us=100000 orb_cgroup");
+    system(command);
+    system("sudo cgset -r cpu.cfs_period_us=100000 orb_cgroup");  
+  system(command);
 
   // End - Set the CGROUP
-// #endif
+#endif
 
 // To collect elasticity data
 
@@ -601,22 +612,22 @@ int main(int argc, char **argv)
 // End - To collect elasticity data
 
 
+#ifdef ELASTIC_SCHED
 
-// @FIXME to change the parameter of the elastic model
 // First Task -- IMU
 // Second Task -- Image
 // Third Task -- BA
   //Task takes T_min, T_max, C, E
+  // elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
+  // elastic_space.add_task(Task {50, 200, 19.5, 4006});
+  // elastic_space.add_task(Task {50, 1200, 270,  114000});
+
   elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
-  elastic_space.add_task(Task {50, 100, 36.5, 4006});
+  elastic_space.add_task(Task {50, 200, 19.5, 4006});
   elastic_space.add_task(Task {50, 1200, 163,  114000});
   elastic_space.generate();
 
-  // elastic_space.add_task(Task {5, 20, 0.0015, 0.263});
-  // elastic_space.add_task(Task {50, 100, 19.5, 4006});
-  // elastic_space.add_task(Task {50, 800, 163,  114000});
-  // elastic_space.generate();
-
+#endif
 
   // Create SLAM system. It initializes all system threads and gets ready to process frames.
   ORB_SLAM3::System SLAM(argv[1],argv[2],ORB_SLAM3::System::IMU_STEREO,true);
@@ -684,9 +695,9 @@ int main(int argc, char **argv)
   std::thread right_img_grab_thread(&ImageGrabber::right_image_thread_function, &igb);
   std::thread left_img_grab_thread(&ImageGrabber::left_image_thread_function, &igb);
 
-
-// Comment out this for execution time profilings
+#ifdef RESTRICT_BANDWIDTH
   std::thread t(update_cpu_utilization);
+#endif
 
   ros::AsyncSpinner spinner(4);  // Use 4 threads
   spinner.start();
@@ -877,17 +888,14 @@ void ImageGrabber::SyncWithImu()
         cv::remap(imLeft,imLeft,M1l,M2l,cv::INTER_LINEAR);
         cv::remap(imRight,imRight,M1r,M2r,cv::INTER_LINEAR);
       }
-#ifdef ELASTIC_SCHED
       if (++image_count >= image_to_skip) {
-#endif
         image_count = 0;
         mpSLAM->TrackStereo(imLeft,imRight,tImLeft,vImuMeas);
-
-#ifdef ELASTIC_SCHED      
       } else {
+#ifdef DEBUG_HARMONIC
         std::cout << "image frame skipped" << std::endl;
-      }
 #endif
+      }
 
 
       clock_gettime(CLOCK_THREAD_CPUTIME_ID, &end);

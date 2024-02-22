@@ -29,6 +29,8 @@
 #include "MLPnPsolver.h"
 #include "GeometricTools.h"
 
+#include "../include/ElasticParameters.h"
+
 #include <iostream>
 
 #include <mutex>
@@ -3062,13 +3064,16 @@ bool Tracking::TrackLocalMap()
 }
 
 
-
 bool Tracking::NeedNewKeyFrame()
 {
-
-// TODO move the skip factor here
-
-    ++ba_count;     
+#ifdef ELASTIC_SCHED
+    if (++ba_count < ba_to_skip) {
+        return false;
+    } else {
+        ba_count = 0;
+        return true;
+    }
+#endif
 
     if((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && !mpAtlas->GetCurrentMap()->isImuInitialized())
     {
@@ -3175,12 +3180,12 @@ bool Tracking::NeedNewKeyFrame()
     {
         if (mSensor==System::IMU_MONOCULAR)
         {
-            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=1.0)
+            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=0.5)
                 c3 = true;
         }
         else if (mSensor==System::IMU_STEREO || mSensor == System::IMU_RGBD)
         {
-            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=1.0)
+            if ((mCurrentFrame.mTimeStamp-mpLastKeyFrame->mTimeStamp)>=0.5)
                 c3 = true;
         }
     }
@@ -3190,47 +3195,6 @@ bool Tracking::NeedNewKeyFrame()
         c4=true;
     else
         c4=false;
-
-
-#ifdef ELASTIC_SCHED
-    // Make the Keyframe deterministic
-    if ((((c1a||c1b||c1c) && c2)||c3 ||c4) ||  (ba_count >= ba_to_skip)) {
-        
-        // If the mapping accepts keyframes, insert keyframe.
-        // Otherwise send a signal to interrupt BA
-        if(bLocalMappingIdle || mpLocalMapper->IsInitializing())
-        {
-            ba_count = 0;
-            return true;
-        }
-        else
-        {
-            mpLocalMapper->InterruptBA();
-            if(mSensor!=System::MONOCULAR  && mSensor!=System::IMU_MONOCULAR)
-            {
-                if(mpLocalMapper->KeyframesInQueue()<3) {
-                    ba_count = 0;
-                    return true;
-                }
-                else
-                    return false;
-            }
-            else
-            {
-                std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
-                return false;
-            }
-        }
-        ba_count = 0;
-        return true;
-    }
-    else 
-        return false;
-    // End - Make the Keyframe deterministic
-
-#else
-
-// This is the original version
 
     if(((c1a||c1b||c1c) && c2)||c3 ||c4)
     {
@@ -3252,14 +3216,13 @@ bool Tracking::NeedNewKeyFrame()
             }
             else
             {
-                std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
+                //std::cout << "NeedNewKeyFrame: localmap is busy" << std::endl;
                 return false;
             }
         }
     }
     else
         return false;
-#endif
 }
 
 void Tracking::CreateNewKeyFrame()
